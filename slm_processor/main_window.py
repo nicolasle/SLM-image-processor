@@ -10,10 +10,10 @@ from PyQt6.QtWidgets import (
     QDoubleSpinBox, QSpinBox, QCheckBox, QPushButton, QRadioButton,
     QButtonGroup, QFileDialog, QMessageBox, QTableWidget, QTableWidgetItem,
     QHeaderView, QStatusBar, QToolBar, QScrollArea, QFrame, QAbstractScrollArea,
-    QApplication
+    QApplication, QMenu, QProgressDialog
 )
-from PyQt6.QtCore import Qt, pyqtSlot, QObject, QEvent
-from PyQt6.QtGui import QAction, QIcon, QFont
+from PyQt6.QtCore import Qt, pyqtSlot, QObject, QEvent, QTimer, QSettings
+from PyQt6.QtGui import QAction, QIcon, QFont, QShortcut, QKeySequence
 
 from slm_processor.data_model import SLMDataset, SLMScan, OBJECTIVE_CALIBRATION
 from slm_processor import processing
@@ -23,6 +23,7 @@ from slm_processor.widgets.series_canvas import SLMSeriesCanvas
 from slm_processor.widgets.dual_view import SLMDualView
 from slm_processor.widgets.overlay_view import SLMOverlayView
 from slm_processor.widgets.channel_manager_dialog import SLMChannelManagerDialog
+from slm_processor.widgets.histogram_widget import SLMHistogramWidget
 
 
 DARK_STYLE = """
@@ -225,8 +226,14 @@ class SLMMainWindow(QMainWindow):
         # Cached series data
         self.series_metrics: List[float] = []
 
+        # Animation player state
+        self.anim_timer = QTimer(self)
+        self.anim_timer.timeout.connect(self._on_animation_step)
+        self.is_anim_playing = False
+
         self._build_ui()
         self._build_menus()
+        self._setup_shortcuts()
 
         # If directory specified or default exists, load it
         if initial_dir and os.path.exists(initial_dir):
@@ -250,12 +257,21 @@ class SLMMainWindow(QMainWindow):
         act_open_single.triggered.connect(self._on_open_single_dialog)
         menu_file.addAction(act_open_single)
 
+        self.menu_recent = menu_file.addMenu("Open &Recent Dataset")
+        self._rebuild_recent_menu()
+
         menu_file.addSeparator()
 
         act_export_img = QAction("Export Current Image (TIFF / PNG)...", self)
         act_export_img.setShortcut("Ctrl+S")
         act_export_img.triggered.connect(self._on_export_image)
         menu_file.addAction(act_export_img)
+
+        act_export_gif = QAction("Export Series as Animated GIF...", self)
+        act_export_gif.setShortcut("Ctrl+Shift+G")
+        act_export_gif.setToolTip("Export the current scan series / time-domain frames into an animated GIF movie")
+        act_export_gif.triggered.connect(self._on_export_gif)
+        menu_file.addAction(act_export_gif)
 
         act_export_batch = QAction("Export Batch Summary CSV...", self)
         act_export_batch.triggered.connect(self._on_export_batch_summary)
@@ -329,9 +345,17 @@ class SLMMainWindow(QMainWindow):
         group_nav = QGroupBox("Dataset & Run Steps")
         nav_layout = QVBoxLayout(group_nav)
         
+        row_ds_header = QHBoxLayout()
         self.lbl_dataset_info = QLabel("No dataset loaded")
         self.lbl_dataset_info.setStyleSheet("color: #aaaaaa; font-style: italic;")
-        nav_layout.addWidget(self.lbl_dataset_info)
+        row_ds_header.addWidget(self.lbl_dataset_info, 1)
+
+        self.btn_recent_menu = QPushButton("📂 Recent ▾")
+        self.btn_recent_menu.setStyleSheet("font-size: 10px; padding: 2px 6px;")
+        self.btn_recent_menu.setToolTip("Quickly select and open recently accessed dataset folders")
+        self.btn_recent_menu.clicked.connect(self._show_recent_popup)
+        row_ds_header.addWidget(self.btn_recent_menu)
+        nav_layout.addLayout(row_ds_header)
 
         row_step = QHBoxLayout()
         row_step.addWidget(QLabel("Step:"))
@@ -352,6 +376,47 @@ class SLMMainWindow(QMainWindow):
         self.slider_steps = QSlider(Qt.Orientation.Horizontal)
         self.slider_steps.valueChanged.connect(self._on_step_slider_changed)
         nav_layout.addWidget(self.slider_steps)
+
+        # Series Movie / Animation Player Controls
+        row_player = QHBoxLayout()
+        row_player.setContentsMargins(0, 2, 0, 2)
+        row_player.setSpacing(6)
+
+        self.btn_play_pause = QPushButton("▶ Play")
+        self.btn_play_pause.setStyleSheet("""
+            QPushButton {
+                background-color: #007acc;
+                color: white;
+                font-weight: bold;
+                padding: 3px 10px;
+                border-radius: 3px;
+                font-size: 10px;
+            }
+            QPushButton:hover { background-color: #1a8ad6; }
+        """)
+        self.btn_play_pause.setToolTip("Play or pause automatic step playback across the series")
+        self.btn_play_pause.clicked.connect(self._toggle_animation_playback)
+        row_player.addWidget(self.btn_play_pause)
+
+        lbl_speed = QLabel("Speed:")
+        lbl_speed.setStyleSheet("color: #aaaaaa; font-size: 10px;")
+        row_player.addWidget(lbl_speed)
+
+        self.spin_anim_fps = QSpinBox()
+        self.spin_anim_fps.setRange(1, 60)
+        self.spin_anim_fps.setValue(10)
+        self.spin_anim_fps.setSuffix(" fps")
+        self.spin_anim_fps.setFixedWidth(65)
+        self.spin_anim_fps.setStyleSheet("font-size: 10px; padding: 1px 3px;")
+        self.spin_anim_fps.valueChanged.connect(self._on_anim_speed_changed)
+        row_player.addWidget(self.spin_anim_fps)
+
+        self.chk_anim_loop = QCheckBox("🔁 Loop")
+        self.chk_anim_loop.setChecked(True)
+        self.chk_anim_loop.setStyleSheet("color: #aaaaaa; font-size: 10px;")
+        row_player.addWidget(self.chk_anim_loop)
+        row_player.addStretch(1)
+        nav_layout.addLayout(row_player)
 
         # Harmonic -> Time Domain Transform Buttons
         self.btn_hermitian_transform = QPushButton("🔄 Transform to Time Domain (IFFT)")
@@ -489,22 +554,27 @@ class SLMMainWindow(QMainWindow):
         self.combo_contrast.currentIndexChanged.connect(self._on_contrast_changed)
         disp_layout.addWidget(self.combo_contrast, 1, 1)
 
-        disp_layout.addWidget(QLabel("Axis Units:"), 2, 0)
+        # Interactive Histogram & Threshold Sliders
+        self.histogram_widget = SLMHistogramWidget(self)
+        self.histogram_widget.clim_changed.connect(self._on_histogram_clim_changed)
+        disp_layout.addWidget(self.histogram_widget, 2, 0, 1, 2)
+
+        disp_layout.addWidget(QLabel("Axis Units:"), 3, 0)
         self.combo_units = QComboBox()
         self.combo_units.addItems(["Mirror Volts (V)", "Physical Distance (µm)"])
         # Default to Physical Distance (µm) if calibration available (Index 1), else Volts (Index 0)
         default_unit_idx = 1 if (self.calib_x_scale > 0 and self.calib_y_scale > 0) else 0
         self.combo_units.setCurrentIndex(default_unit_idx)
         self.combo_units.currentIndexChanged.connect(self._on_units_changed)
-        disp_layout.addWidget(self.combo_units, 2, 1)
+        disp_layout.addWidget(self.combo_units, 3, 1)
 
-        disp_layout.addWidget(QLabel("Objective:"), 3, 0)
+        disp_layout.addWidget(QLabel("Objective:"), 4, 0)
         self.combo_objective = QComboBox()
         self.combo_objective.addItems(["50x", "100x", "20x", "10x", "5x", "Custom"])
         self.combo_objective.currentTextChanged.connect(self._on_objective_changed)
-        disp_layout.addWidget(self.combo_objective, 3, 1)
+        disp_layout.addWidget(self.combo_objective, 4, 1)
 
-        disp_layout.addWidget(QLabel("Calibration (µm/V):"), 4, 0)
+        disp_layout.addWidget(QLabel("Calibration (µm/V):"), 5, 0)
         row_calib = QHBoxLayout()
         self.spin_calib_x = QDoubleSpinBox()
         self.spin_calib_x.setRange(0.001, 100000.0)
@@ -520,11 +590,20 @@ class SLMMainWindow(QMainWindow):
         self.spin_calib_y.valueChanged.connect(self._on_calib_changed)
         row_calib.addWidget(self.spin_calib_x)
         row_calib.addWidget(self.spin_calib_y)
-        disp_layout.addLayout(row_calib, 4, 1)
+        disp_layout.addLayout(row_calib, 5, 1)
 
-        self.chk_invert_y = QCheckBox("Invert Y-Axis (Origin Top)")
+        row_toggles = QHBoxLayout()
+        self.chk_invert_y = QCheckBox("Invert Y-Axis")
         self.chk_invert_y.toggled.connect(self._on_invert_y_toggled)
-        disp_layout.addWidget(self.chk_invert_y, 5, 0, 1, 2)
+        row_toggles.addWidget(self.chk_invert_y)
+
+        self.chk_show_scale_bar = QCheckBox("Show Scale Bar")
+        self.chk_show_scale_bar.setChecked(True)
+        self.chk_show_scale_bar.setToolTip("Show / hide calibrated scale bar in bottom-right corner")
+        self.chk_show_scale_bar.toggled.connect(self._on_scale_bar_toggled)
+        row_toggles.addWidget(self.chk_show_scale_bar)
+        disp_layout.addLayout(row_toggles, 6, 0, 1, 2)
+
         sidebar_layout.addWidget(group_display)
 
         # --- 6. Interactive Analysis Tools ---
@@ -535,10 +614,11 @@ class SLMMainWindow(QMainWindow):
         self.rb_tool_crosshair = QRadioButton("Crosshair Readout")
         self.rb_tool_line = QRadioButton("Line Profile Cut (drag or select)")
         self.rb_tool_roi = QRadioButton("ROI Rectangle (drag)")
+        self.rb_tool_caliper = QRadioButton("Distance Caliper (click & drag)")
         self.rb_tool_navigate = QRadioButton("Pan / Zoom Canvas")
         self.rb_tool_crosshair.setChecked(True)
 
-        for i, rb in enumerate([self.rb_tool_crosshair, self.rb_tool_line, self.rb_tool_roi, self.rb_tool_navigate]):
+        for i, rb in enumerate([self.rb_tool_crosshair, self.rb_tool_line, self.rb_tool_roi, self.rb_tool_caliper, self.rb_tool_navigate]):
             self.btn_group_tools.addButton(rb, i)
             tools_layout.addWidget(rb)
         self.btn_group_tools.buttonClicked.connect(self._on_tool_mode_changed)
@@ -606,26 +686,21 @@ class SLMMainWindow(QMainWindow):
         subopt_vbox.setContentsMargins(6, 4, 6, 4)
         subopt_vbox.setSpacing(4)
 
-        # Row 1: Mode Switch & Status
+        # Row 1: Mode Switch & Quick-Switch Pill Bar
         row_sub_mode = QHBoxLayout()
         row_sub_mode.setContentsMargins(0, 0, 0, 0)
-        row_sub_mode.setSpacing(8)
+        row_sub_mode.setSpacing(6)
 
-        lbl_sub_title = QLabel("2D View Mode:")
+        lbl_sub_title = QLabel("Quick Switch:")
         lbl_sub_title.setStyleSheet("font-weight: bold; color: #aaaaaa; font-size: 11px;")
         row_sub_mode.addWidget(lbl_sub_title)
 
-        self.btn_group_submode = QButtonGroup(self)
-
-        self.btn_sub_single = QPushButton("◉ Single Channel")
-        self.btn_sub_single.setCheckable(True)
-        self.btn_sub_single.setChecked(True)
-        self.btn_sub_single.setStyleSheet("""
+        pill_style_base = """
             QPushButton {
                 background-color: #2b2b2b;
                 color: #cccccc;
                 font-weight: bold;
-                padding: 4px 14px;
+                padding: 4px 10px;
                 border-radius: 4px;
                 border: 1px solid #444444;
                 font-size: 11px;
@@ -636,34 +711,46 @@ class SLMMainWindow(QMainWindow):
                 color: #ffffff;
                 border: 1px solid #0098ff;
             }
-        """)
+        """
 
-        self.btn_sub_overlay = QPushButton("🔀 PR on PD (Overlay)")
-        self.btn_sub_overlay.setCheckable(True)
-        self.btn_sub_overlay.setStyleSheet("""
-            QPushButton {
-                background-color: #2b2b2b;
-                color: #cccccc;
-                font-weight: bold;
-                padding: 4px 14px;
-                border-radius: 4px;
-                border: 1px solid #444444;
-                font-size: 11px;
-            }
-            QPushButton:hover { background-color: #383838; }
-            QPushButton:checked {
-                background-color: #9c27b0;
-                color: #ffffff;
-                border: 1px solid #ba68c8;
-            }
-        """)
+        self.btn_quick_pd = QPushButton("🔬 PD (1)")
+        self.btn_quick_pd.setCheckable(True)
+        self.btn_quick_pd.setStyleSheet(pill_style_base)
+        self.btn_quick_pd.setToolTip("Quick switch to Photodiode reflection baseline (Shortcut: Key 1)")
+        self.btn_quick_pd.clicked.connect(self._quick_switch_pd)
+        row_sub_mode.addWidget(self.btn_quick_pd)
 
-        self.btn_group_submode.addButton(self.btn_sub_single, 0)
-        self.btn_group_submode.addButton(self.btn_sub_overlay, 1)
-        self.btn_group_submode.buttonClicked.connect(self._on_submode_toggled)
+        self.btn_quick_pr = QPushButton("⚡ PR (2)")
+        self.btn_quick_pr.setCheckable(True)
+        self.btn_quick_pr.setStyleSheet(pill_style_base)
+        self.btn_quick_pr.setToolTip("Quick switch to Photoresponse signal (Shortcut: Key 2)")
+        self.btn_quick_pr.clicked.connect(self._quick_switch_pr)
+        row_sub_mode.addWidget(self.btn_quick_pr)
 
-        row_sub_mode.addWidget(self.btn_sub_single)
-        row_sub_mode.addWidget(self.btn_sub_overlay)
+        self.btn_quick_overlay = QPushButton("🔀 Overlay (3)")
+        self.btn_quick_overlay.setCheckable(True)
+        self.btn_quick_overlay.setStyleSheet(pill_style_base.replace("#007acc", "#9c27b0").replace("#0098ff", "#ba68c8"))
+        self.btn_quick_overlay.setToolTip("Quick switch to PR on PD blended overlay (Shortcut: Key 3)")
+        self.btn_quick_overlay.clicked.connect(self._quick_switch_overlay)
+        row_sub_mode.addWidget(self.btn_quick_overlay)
+
+        self.btn_quick_dual = QPushButton("◫ Dual View (4)")
+        self.btn_quick_dual.setCheckable(True)
+        self.btn_quick_dual.setStyleSheet(pill_style_base.replace("#007acc", "#d84315").replace("#0098ff", "#ff5722"))
+        self.btn_quick_dual.setToolTip("Toggle Dual side-by-side comparison view (Shortcut: Key 4)")
+        self.btn_quick_dual.clicked.connect(self._quick_switch_dual)
+        row_sub_mode.addWidget(self.btn_quick_dual)
+
+        # Retain aliases for internal button group logic
+        self.btn_sub_single = self.btn_quick_pr
+        self.btn_sub_overlay = self.btn_quick_overlay
+
+        self.btn_group_submode = QButtonGroup(self)
+        self.btn_group_submode.addButton(self.btn_quick_pd, 0)
+        self.btn_group_submode.addButton(self.btn_quick_pr, 1)
+        self.btn_group_submode.addButton(self.btn_quick_overlay, 2)
+        self.btn_group_submode.addButton(self.btn_quick_dual, 3)
+
         row_sub_mode.addSpacing(15)
 
         self.lbl_sub_single_info = QLabel("Active Channel: PR_R")
@@ -750,6 +837,7 @@ class SLMMainWindow(QMainWindow):
         self.canvas_2d.pixel_hovered.connect(self._on_pixel_hovered)
         self.canvas_2d.line_cut_changed.connect(self._on_line_cut_changed)
         self.canvas_2d.roi_changed.connect(self._on_roi_changed)
+        self.canvas_2d.caliper_measured.connect(self._on_caliper_measured)
 
         self.canvas_profile = SLMProfileCanvas(self)
 
@@ -778,6 +866,7 @@ class SLMMainWindow(QMainWindow):
         layout_series.setSpacing(4)
         self.canvas_series = SLMSeriesCanvas(self)
         self.canvas_series.step_selected.connect(self._on_series_step_clicked)
+        self.canvas_series.export_gif_requested.connect(self._on_export_gif)
         layout_series.addWidget(self.canvas_series)
         self.tabs.addTab(self.canvas_series, "Run Series Trend")
 
@@ -833,6 +922,7 @@ class SLMMainWindow(QMainWindow):
                 self.btn_switch_domain.setVisible(False)
 
             self._populate_dataset_ui()
+            self._save_recent_dataset(dir_path)
             self.statusBar.showMessage(f"Loaded {len(self.dataset)} scans from {dir_path}", 4000)
 
         except Exception as e:
@@ -1151,6 +1241,7 @@ class SLMMainWindow(QMainWindow):
                 proc_fct=self._get_processed_image,
                 calib_um_per_v=self.calib_x_scale
             )
+        self._update_quick_buttons_state()
 
     def _calc_contrast_limits(self, image: Optional[np.ndarray]) -> Optional[Tuple[float, float]]:
         if image is None:
@@ -1182,6 +1273,10 @@ class SLMMainWindow(QMainWindow):
                 clim_o = self._calc_contrast_limits(self.current_processed_data)
                 if clim_o is not None:
                     self.canvas_2d.set_clim_overlay(clim_o[0], clim_o[1])
+                if hasattr(self, "histogram_widget"):
+                    vo_min = clim_o[0] if clim_o else None
+                    vo_max = clim_o[1] if clim_o else None
+                    self.histogram_widget.set_data(self.current_processed_data, vo_min, vo_max)
         else:
             target = image if image is not None else self.current_processed_data
             if target is not None:
@@ -1190,6 +1285,32 @@ class SLMMainWindow(QMainWindow):
                     self.canvas_2d.set_clim(clim[0], clim[1])
                 else:
                     self.canvas_2d.set_clim(None, None)
+                if hasattr(self, "histogram_widget"):
+                    c_min = clim[0] if clim else None
+                    c_max = clim[1] if clim else None
+                    self.histogram_widget.set_data(target, c_min, c_max)
+
+    def _on_histogram_clim_changed(self, vmin: float, vmax: float):
+        """Called when user drags histogram threshold lines or edits spinboxes."""
+        self.combo_contrast.blockSignals(True)
+        self.combo_contrast.setCurrentText("Manual")
+        self.combo_contrast.blockSignals(False)
+        if self._get_current_channel_key() == "OVERLAY":
+            self.canvas_2d.set_clim_overlay(vmin, vmax)
+        else:
+            self.canvas_2d.set_clim(vmin, vmax)
+
+    def _on_scale_bar_toggled(self, checked: bool):
+        self.canvas_2d.set_show_scale_bar(checked)
+
+    def _on_caliper_measured(self, x0: float, y0: float, x1: float, y1: float, length: float):
+        dx = abs(x1 - x0)
+        dy = abs(y1 - y0)
+        unit = self.calib_unit
+        self.lbl_cursor_val.setText(f"Caliper: L = {length:.4f} {unit}  (ΔX = {dx:.4f}, ΔY = {dy:.4f})")
+        self.statusBar.showMessage(
+            f"Caliper: Distance = {length:.4f} {unit} | ΔX: {dx:.4f} {unit} | ΔY: {dy:.4f} {unit} | Start: ({x0:.3f}, {y0:.3f}) End: ({x1:.3f}, {y1:.3f})"
+        )
 
     def _update_line_profile(self, c0: float, r0: float, c1: float, r1: float):
         if self.current_processed_data is None or not self.dataset:
@@ -1452,11 +1573,12 @@ class SLMMainWindow(QMainWindow):
 
     def _on_tool_mode_changed(self, button):
         mode_idx = self.btn_group_tools.id(button)
-        modes = ["crosshair", "line", "roi", "navigate"]
-        self.active_tool_mode = modes[mode_idx]
-        self.canvas_2d.set_mode(self.active_tool_mode)
-        if hasattr(self, "dual_view"):
-            self.dual_view.set_mode(self.active_tool_mode)
+        modes = ["crosshair", "line", "roi", "caliper", "navigate"]
+        if 0 <= mode_idx < len(modes):
+            self.active_tool_mode = modes[mode_idx]
+            self.canvas_2d.set_mode(self.active_tool_mode)
+            if hasattr(self, "dual_view"):
+                self.dual_view.set_mode(self.active_tool_mode)
 
     def _on_quick_hcut(self):
         self.rb_tool_line.setChecked(True)
@@ -1603,6 +1725,7 @@ class SLMMainWindow(QMainWindow):
             self._update_dual_view()
         elif index == 2:
             self._update_series_trend()
+        self._update_quick_buttons_state()
 
     def _on_reset_filters(self):
         self.combo_plane.setCurrentIndex(0)
@@ -1660,6 +1783,278 @@ class SLMMainWindow(QMainWindow):
             self.statusBar.showMessage(f"Batch summary exported to {path}", 4000)
         except Exception as e:
             QMessageBox.critical(self, "Export Error", f"Failed to export summary: {e}")
+
+    # --- Recent Datasets Management ---
+
+    def _get_recent_datasets(self) -> List[str]:
+        settings = QSettings("SLMProcessor", "RecentDatasets")
+        val = settings.value("history", [])
+        if isinstance(val, str):
+            return [val] if val and os.path.exists(val) else []
+        elif isinstance(val, list):
+            return [str(v) for v in val if v and os.path.exists(str(v))]
+        return []
+
+    def _save_recent_dataset(self, path: str):
+        if not path or not os.path.exists(path):
+            return
+        abs_path = os.path.abspath(path)
+        recent = self._get_recent_datasets()
+        if abs_path in recent:
+            recent.remove(abs_path)
+        recent.insert(0, abs_path)
+        recent = recent[:10]
+
+        settings = QSettings("SLMProcessor", "RecentDatasets")
+        settings.setValue("history", recent)
+        self._rebuild_recent_menu()
+
+    def _rebuild_recent_menu(self):
+        if not hasattr(self, "menu_recent"):
+            return
+        self.menu_recent.clear()
+        recent = self._get_recent_datasets()
+        if not recent:
+            act_none = QAction("No Recent Datasets", self)
+            act_none.setEnabled(False)
+            self.menu_recent.addAction(act_none)
+            return
+
+        for i, p in enumerate(recent):
+            base = os.path.basename(p) or p
+            parent = os.path.basename(os.path.dirname(p))
+            label = f"&{i+1}: {base} ({parent})" if i < 9 else f"{base} ({parent})"
+            act = QAction(label, self)
+            act.setToolTip(p)
+            act.triggered.connect(lambda _, path=p: self.load_directory(path))
+            self.menu_recent.addAction(act)
+
+        self.menu_recent.addSeparator()
+        act_clear = QAction("Clear Recent History", self)
+        act_clear.triggered.connect(self._clear_recent_history)
+        self.menu_recent.addAction(act_clear)
+
+    def _clear_recent_history(self):
+        settings = QSettings("SLMProcessor", "RecentDatasets")
+        settings.setValue("history", [])
+        self._rebuild_recent_menu()
+
+    def _show_recent_popup(self):
+        menu = QMenu(self)
+        menu.setStyleSheet(DARK_STYLE)
+        recent = self._get_recent_datasets()
+        if not recent:
+            act_none = QAction("No Recent Datasets", self)
+            act_none.setEnabled(False)
+            menu.addAction(act_none)
+        else:
+            for p in recent:
+                base = os.path.basename(p) or p
+                act = QAction(f"📂 {base}  [{p}]", self)
+                act.triggered.connect(lambda _, path=p: self.load_directory(path))
+                menu.addAction(act)
+        menu.exec(self.btn_recent_menu.mapToGlobal(self.btn_recent_menu.rect().bottomLeft()))
+
+    # --- Animation Playback & Series GIF Movie ---
+
+    def _toggle_animation_playback(self):
+        if not self.dataset or len(self.dataset) == 0:
+            return
+        if getattr(self, "is_anim_playing", False):
+            self._stop_animation()
+        else:
+            self._start_animation()
+
+    def _start_animation(self):
+        self.is_anim_playing = True
+        self.btn_play_pause.setText("⏸ Pause")
+        self.btn_play_pause.setStyleSheet("font-weight: bold; background-color: #d32f2f; color: white; padding: 3px 10px; border-radius: 3px; font-size: 10px;")
+        fps = self.spin_anim_fps.value()
+        interval_ms = int(max(10, 1000 / max(1, fps)))
+        self.anim_timer.start(interval_ms)
+
+    def _stop_animation(self):
+        self.is_anim_playing = False
+        self.anim_timer.stop()
+        if hasattr(self, "btn_play_pause"):
+            self.btn_play_pause.setText("▶ Play")
+            self.btn_play_pause.setStyleSheet("font-weight: bold; background-color: #007acc; color: white; padding: 3px 10px; border-radius: 3px; font-size: 10px;")
+
+    def _on_anim_speed_changed(self, fps: int):
+        if getattr(self, "is_anim_playing", False):
+            interval_ms = int(max(10, 1000 / max(1, fps)))
+            self.anim_timer.setInterval(interval_ms)
+
+    def _on_animation_step(self):
+        if not self.dataset or len(self.dataset) == 0:
+            self._stop_animation()
+            return
+        next_idx = self.current_scan_idx + 1
+        if next_idx >= len(self.dataset):
+            if self.chk_anim_loop.isChecked():
+                next_idx = 0
+            else:
+                self._stop_animation()
+                return
+        self.combo_steps.setCurrentIndex(next_idx)
+
+    def _on_export_gif(self):
+        if not self.dataset or len(self.dataset) == 0:
+            QMessageBox.information(self, "No Dataset", "Please load a dataset first.")
+            return
+
+        path, _ = QFileDialog.getSaveFileName(self, "Export Series as Animated GIF", "", "GIF Animation (*.gif)")
+        if not path:
+            return
+        if not path.lower().endswith(".gif"):
+            path += ".gif"
+
+        from PIL import Image
+        import matplotlib.cm as cm
+
+        fps = self.spin_anim_fps.value() if hasattr(self, "spin_anim_fps") else 10
+        duration_ms = int(max(10, 1000 / max(1, fps)))
+
+        channel_key = self._get_current_channel_key()
+        phase_deg = self.spin_phase.value()
+        cmap_name = self.combo_cmap.currentText()
+        cmap = cm.get_cmap(cmap_name)
+
+        progress = QProgressDialog("Rendering series frames for GIF...", "Cancel", 0, len(self.dataset), self)
+        progress.setWindowTitle("Exporting Animated GIF")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.show()
+
+        frames = []
+        try:
+            vmin, vmax = None, None
+            if self.canvas_2d.clim is not None:
+                vmin, vmax = self.canvas_2d.clim
+
+            for i, scan in enumerate(self.dataset.scans):
+                if progress.wasCanceled():
+                    return
+                progress.setValue(i)
+                progress.setLabelText(f"Rendering frame {i+1} of {len(self.dataset)} (Step: {scan.step_name})...")
+                QApplication.processEvents()
+
+                img = self._get_processed_image(scan, channel_key, phase_deg)
+                if vmin is None or vmax is None:
+                    c_min, c_max = float(np.min(img)), float(np.max(img))
+                else:
+                    c_min, c_max = vmin, vmax
+
+                span = max(1e-12, c_max - c_min)
+                norm = np.clip((img - c_min) / span, 0.0, 1.0)
+                rgba = (cmap(norm) * 255).astype(np.uint8)
+                frame = Image.fromarray(rgba).convert("RGB")
+                frames.append(frame)
+
+            progress.setValue(len(self.dataset))
+            if frames:
+                frames[0].save(
+                    path,
+                    save_all=True,
+                    append_images=frames[1:],
+                    duration=duration_ms,
+                    loop=0
+                )
+                self.statusBar.showMessage(f"Series animation exported successfully to {path}", 5000)
+                QMessageBox.information(self, "Export Complete", f"Successfully exported animated GIF to:\n{path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", f"Failed to export animated GIF:\n{e}")
+
+    # --- Quick-Switch Shortcuts & Favorite Channels ---
+
+    def _setup_shortcuts(self):
+        self.sc_pd = QShortcut(QKeySequence("1"), self)
+        self.sc_pd.activated.connect(self._quick_switch_pd)
+
+        self.sc_pr = QShortcut(QKeySequence("2"), self)
+        self.sc_pr.activated.connect(self._quick_switch_pr)
+
+        self.sc_over = QShortcut(QKeySequence("3"), self)
+        self.sc_over.activated.connect(self._quick_switch_overlay)
+
+        self.sc_dual = QShortcut(QKeySequence("4"), self)
+        self.sc_dual.activated.connect(self._quick_switch_dual)
+
+    def _quick_switch_pd(self):
+        """Switch to Photodiode (PD) channel in Single Channel view."""
+        self.tabs.setCurrentIndex(0)
+        if hasattr(self, "btn_sub_single") and hasattr(self, "btn_sub_overlay"):
+            self.btn_sub_single.setChecked(True)
+            self._on_submode_toggled(self.btn_sub_single)
+
+        chans = [self.combo_channel.itemText(i) for i in range(self.combo_channel.count())]
+        for c in ["PD_R", "X_PD", "PD_X", "PD"]:
+            if c in chans:
+                self.combo_channel.setCurrentText(c)
+                self.statusBar.showMessage(f"Switched to Photodiode channel ({c}) [Hotkey: 1]", 3000)
+                self._update_quick_buttons_state()
+                return
+        if chans:
+            self.combo_channel.setCurrentIndex(0)
+            self._update_quick_buttons_state()
+
+    def _quick_switch_pr(self):
+        """Switch to Photoresponse (PR) channel in Single Channel view."""
+        self.tabs.setCurrentIndex(0)
+        if hasattr(self, "btn_sub_single") and hasattr(self, "btn_sub_overlay"):
+            self.btn_sub_single.setChecked(True)
+            self._on_submode_toggled(self.btn_sub_single)
+
+        chans = [self.combo_channel.itemText(i) for i in range(self.combo_channel.count())]
+        for c in ["PR_R", "X_PR", "PR_X", "PR", "P4_R", "P4_X", "P4"]:
+            if c in chans:
+                self.combo_channel.setCurrentText(c)
+                self.statusBar.showMessage(f"Switched to Photoresponse channel ({c}) [Hotkey: 2]", 3000)
+                self._update_quick_buttons_state()
+                return
+        if len(chans) > 1:
+            self.combo_channel.setCurrentIndex(1)
+            self._update_quick_buttons_state()
+
+    def _quick_switch_overlay(self):
+        """Switch to PR on PD Overlay view."""
+        self.tabs.setCurrentIndex(0)
+        if hasattr(self, "btn_sub_overlay"):
+            self.btn_sub_overlay.setChecked(True)
+            self._on_submode_toggled(self.btn_sub_overlay)
+            self.statusBar.showMessage("Switched to PR on PD Overlay View [Hotkey: 3]", 3000)
+            self._update_quick_buttons_state()
+
+    def _quick_switch_dual(self):
+        """Toggle to Dual Side-by-Side View (or back to Single)."""
+        if self.tabs.currentIndex() == 1:
+            self.tabs.setCurrentIndex(0)
+            self.statusBar.showMessage("Returned to 2D Single Image & Cut [Hotkey: 4]", 3000)
+        else:
+            self.tabs.setCurrentIndex(1)
+            self.statusBar.showMessage("Switched to Dual Side-by-Side View [Hotkey: 4]", 3000)
+        self._update_quick_buttons_state()
+
+    def _update_quick_buttons_state(self):
+        if not hasattr(self, "btn_quick_pd"):
+            return
+        is_dual = (self.tabs.currentIndex() == 1)
+        is_over = (self.tabs.currentIndex() == 0 and hasattr(self, "btn_sub_overlay") and self.btn_sub_overlay.isChecked())
+        curr_chan = self.combo_channel.currentText()
+
+        self.btn_quick_dual.blockSignals(True)
+        self.btn_quick_overlay.blockSignals(True)
+        self.btn_quick_pd.blockSignals(True)
+        self.btn_quick_pr.blockSignals(True)
+
+        self.btn_quick_dual.setChecked(is_dual)
+        self.btn_quick_overlay.setChecked(is_over and not is_dual)
+        self.btn_quick_pd.setChecked(not is_dual and not is_over and ("PD" in curr_chan))
+        self.btn_quick_pr.setChecked(not is_dual and not is_over and ("PR" in curr_chan or "P4" in curr_chan))
+
+        self.btn_quick_dual.blockSignals(False)
+        self.btn_quick_overlay.blockSignals(False)
+        self.btn_quick_pd.blockSignals(False)
+        self.btn_quick_pr.blockSignals(False)
 
     def _show_about(self):
         QMessageBox.about(

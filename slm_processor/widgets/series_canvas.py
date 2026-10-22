@@ -13,6 +13,7 @@ from matplotlib.figure import Figure
 class SLMSeriesCanvas(QWidget):
     """Plots signal trends across multi-run / multi-step datasets."""
     step_selected = pyqtSignal(int)  # emits index of the clicked scan step
+    export_gif_requested = pyqtSignal()
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -41,8 +42,13 @@ class SLMSeriesCanvas(QWidget):
         self.btn_export.setStyleSheet("font-size: 10px; padding: 2px 8px;")
         self.btn_export.clicked.connect(self._export_csv)
 
+        self.btn_export_gif = QPushButton("Export Movie GIF...")
+        self.btn_export_gif.setStyleSheet("font-size: 10px; padding: 2px 8px; color: #00e5ff;")
+        self.btn_export_gif.clicked.connect(self.export_gif_requested.emit)
+
         header.addWidget(self.title_label)
         header.addStretch(1)
+        header.addWidget(self.btn_export_gif)
         header.addWidget(self.btn_export)
 
         layout = QVBoxLayout(self)

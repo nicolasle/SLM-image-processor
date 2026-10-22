@@ -26,6 +26,7 @@ class SLMImageCanvas(QWidget):
     line_cut_changed = pyqtSignal(float, float, float, float)  # col0, row0, col1, row1 (pixels)
     roi_changed = pyqtSignal(int, int, int, int)              # c0, r0, c1, r1 (pixels)
     limits_changed = pyqtSignal(tuple, tuple)                 # (xlim_min, xlim_max), (ylim_min, ylim_max)
+    caliper_measured = pyqtSignal(float, float, float, float, float)  # x0, y0, x1, y1, length (physical)
 
     def __init__(self, parent: Optional[QWidget] = None, title: str = ""):
         super().__init__(parent)
@@ -44,7 +45,7 @@ class SLMImageCanvas(QWidget):
         self.y_coords: Optional[np.ndarray] = None  # rows (volts or um)
         self.unit_label: str = "µm"
 
-        # Interactive mode: "navigate", "crosshair", "line", "roi"
+        # Interactive mode: "navigate", "crosshair", "line", "roi", "caliper"
         self.interaction_mode = "crosshair"
         self._updating_limits = False
         
@@ -52,6 +53,7 @@ class SLMImageCanvas(QWidget):
         self.crosshair_pos: Optional[Tuple[int, int]] = None
         self.line_points: Optional[Tuple[float, float, float, float]] = None # (c0, r0, c1, r1)
         self.roi_box: Optional[Tuple[int, int, int, int]] = None             # (c0, r0, c1, r1)
+        self.caliper_points: Optional[Tuple[float, float, float, float]] = None # (x0, y0, x1, y1)
         self._drag_start: Optional[Tuple[float, float]] = None
         self._is_dragging = False
 
@@ -59,6 +61,7 @@ class SLMImageCanvas(QWidget):
         self.cmap_name = "cividis"
         self.origin = "lower"
         self.invert_y = False
+        self.show_scale_bar = True
         self.clim: Optional[Tuple[float, float]] = None
         self.clim_overlay: Optional[Tuple[float, float]] = None
         self.aspect_mode: str = "physical"  # "physical", "square", "fill"
@@ -84,6 +87,11 @@ class SLMImageCanvas(QWidget):
         self.crosshair_h = None
         self.line_artist = None
         self.roi_patch = None
+        self.caliper_line = None
+        self.caliper_text = None
+        self.scalebar_bg = None
+        self.scalebar_fg = None
+        self.scalebar_text = None
 
         # Add aspect ratio selector and center button directly on toolbar
         self.toolbar.addSeparator()
@@ -103,6 +111,13 @@ class SLMImageCanvas(QWidget):
         self.btn_center.setStyleSheet("font-size: 10px; padding: 2px 6px; font-weight: bold;")
         self.btn_center.clicked.connect(self.reset_view)
         self.toolbar.addWidget(self.btn_center)
+
+        self.chk_scalebar = QCheckBox(" Scale Bar ")
+        self.chk_scalebar.setChecked(True)
+        self.chk_scalebar.setToolTip("Show / hide calibrated physical scale bar in the bottom-right corner")
+        self.chk_scalebar.setStyleSheet("color: #00e5ff; font-size: 10px; font-weight: bold;")
+        self.chk_scalebar.toggled.connect(self.set_show_scale_bar)
+        self.toolbar.addWidget(self.chk_scalebar)
 
         # Layout
         layout = QVBoxLayout(self)
@@ -347,7 +362,18 @@ class SLMImageCanvas(QWidget):
 
     def _on_axis_limits_changed(self, ax):
         if not self._updating_limits:
+            self._update_scale_bar()
             self.limits_changed.emit(ax.get_xlim(), ax.get_ylim())
+
+    def set_show_scale_bar(self, show: bool):
+        """Enables or disables on-canvas physical scale bar."""
+        self.show_scale_bar = bool(show)
+        if hasattr(self, "chk_scalebar"):
+            self.chk_scalebar.blockSignals(True)
+            self.chk_scalebar.setChecked(self.show_scale_bar)
+            self.chk_scalebar.blockSignals(False)
+        self._update_scale_bar()
+        self.canvas.draw_idle()
 
     def _on_aspect_combo_changed(self, idx: int):
         modes = ["physical", "square", "fill"]
@@ -530,14 +556,33 @@ class SLMImageCanvas(QWidget):
         self.canvas.draw_idle()
 
     def _create_overlays(self):
-        """Creates or recreates line and crosshair artists."""
+        """Creates or recreates line, caliper, crosshair, and scale bar artists."""
         try:
             self.crosshair_v = self.ax.axvline(x=0, color="#00ffcc", linestyle="--", linewidth=1.0, alpha=0.8)
             self.crosshair_h = self.ax.axhline(y=0, color="#00ffcc", linestyle="--", linewidth=1.0, alpha=0.8)
             self.line_artist, = self.ax.plot([], [], color="#ff3366", marker="o", markersize=3, linewidth=1.5, alpha=0.9)
             self.roi_patch = patches.Rectangle((0, 0), 0, 0, linewidth=1.5, edgecolor="#ffff00", facecolor="none", linestyle="--", alpha=0.9)
             self.ax.add_patch(self.roi_patch)
+
+            # Caliper tool artists
+            self.caliper_line, = self.ax.plot([], [], color="#00e5ff", linewidth=2.0, marker="o", markersize=4, alpha=0.95)
+            self.caliper_text = self.ax.text(
+                0, 0, "", color="#00e5ff", fontsize=9, fontweight="bold",
+                ha="center", va="bottom",
+                bbox=dict(boxstyle="round,pad=0.2", facecolor="#181818", edgecolor="#00e5ff", alpha=0.85)
+            )
+
+            # Calibrated physical scale bar artists
+            self.scalebar_bg, = self.ax.plot([], [], color="#000000", linewidth=5.5, alpha=0.85, solid_capstyle="butt")
+            self.scalebar_fg, = self.ax.plot([], [], color="#ffffff", linewidth=3.5, alpha=0.95, solid_capstyle="butt")
+            self.scalebar_text = self.ax.text(
+                0, 0, "", color="#ffffff", fontsize=8.5, fontweight="bold",
+                ha="center", va="bottom",
+                bbox=dict(boxstyle="round,pad=0.2", facecolor="#1e1e1e", edgecolor="none", alpha=0.75)
+            )
+
             self._update_overlays()
+            self._update_scale_bar()
         except (np.linalg.LinAlgError, ValueError):
             pass
 
@@ -557,6 +602,77 @@ class SLMImageCanvas(QWidget):
         c_idx = int(np.clip(np.argmin(np.abs(self.x_coords - x)), 0, cols - 1))
         r_idx = int(np.clip(np.argmin(np.abs(self.y_coords - y)), 0, rows - 1))
         return c_idx, r_idx
+
+    def _update_scale_bar(self):
+        """Calculates and draws calibrated scale bar in physical or voltage units."""
+        if not hasattr(self, "scalebar_fg") or self.scalebar_fg is None or self.ax is None:
+            return
+        if not self.show_scale_bar or self.image_data is None:
+            if self.scalebar_bg:
+                self.scalebar_bg.set_visible(False)
+            if self.scalebar_fg:
+                self.scalebar_fg.set_visible(False)
+            if self.scalebar_text:
+                self.scalebar_text.set_visible(False)
+            return
+
+        xlim = self.ax.get_xlim()
+        ylim = self.ax.get_ylim()
+        x_min, x_max = min(xlim), max(xlim)
+        y_min, y_max = min(ylim), max(ylim)
+        dx_vis = abs(x_max - x_min)
+        dy_vis = abs(y_max - y_min)
+
+        if dx_vis <= 1e-9 or dy_vis <= 1e-9:
+            return
+
+        # Target scale bar size is ~20% of visible width
+        target_len = dx_vis * 0.20
+        exponent = np.floor(np.log10(target_len))
+        fraction = target_len / (10 ** exponent)
+        if fraction < 1.5:
+            nice_mult = 1.0
+        elif fraction < 3.5:
+            nice_mult = 2.0
+        elif fraction < 7.5:
+            nice_mult = 5.0
+        else:
+            nice_mult = 10.0
+        scale_len = float(nice_mult * (10 ** exponent))
+
+        # Bottom-right placement with 5% margin
+        x_end = x_max - 0.05 * dx_vis
+        x_start = x_end - scale_len
+        if x_start < x_min:
+            x_start = x_min + 0.05 * dx_vis
+
+        # In y: account for orientation
+        if self.invert_y or ylim[0] > ylim[1]:
+            # Origin top: visually bottom is high y
+            y_bar = y_max - 0.05 * dy_vis
+            y_txt = y_bar - 0.02 * dy_vis
+            va = "bottom"
+        else:
+            # Origin bottom: visually bottom is low y
+            y_bar = y_min + 0.05 * dy_vis
+            y_txt = y_bar + 0.02 * dy_vis
+            va = "bottom"
+
+        self.scalebar_bg.set_data([x_start, x_end], [y_bar, y_bar])
+        self.scalebar_fg.set_data([x_start, x_end], [y_bar, y_bar])
+        self.scalebar_bg.set_visible(True)
+        self.scalebar_fg.set_visible(True)
+
+        if scale_len >= 1.0:
+            lbl = f"{int(scale_len) if scale_len.is_integer() else scale_len:g} {self.unit_label}"
+        else:
+            lbl = f"{scale_len:g} {self.unit_label}"
+
+        x_mid = 0.5 * (x_start + x_end)
+        self.scalebar_text.set_position((x_mid, y_txt))
+        self.scalebar_text.set_text(lbl)
+        self.scalebar_text.set_va(va)
+        self.scalebar_text.set_visible(True)
 
     def _update_overlays(self):
         if self.crosshair_pos and self.crosshair_v and self.crosshair_h:
@@ -582,6 +698,25 @@ class SLMImageCanvas(QWidget):
             self.roi_patch.set_width(abs(x1 - x0))
             self.roi_patch.set_height(abs(y1 - y0))
             self.roi_patch.set_visible(self.interaction_mode in ("roi", "navigate"))
+
+        if hasattr(self, "caliper_line") and self.caliper_line:
+            is_cal = (self.interaction_mode == "caliper" and self.caliper_points is not None)
+            self.caliper_line.set_visible(is_cal)
+            if self.caliper_text:
+                self.caliper_text.set_visible(is_cal)
+            if is_cal and self.caliper_points:
+                x0, y0, x1, y1 = self.caliper_points
+                self.caliper_line.set_data([x0, x1], [y0, y1])
+                dx = x1 - x0
+                dy = y1 - y0
+                dist = float(np.hypot(dx, dy))
+                xm = 0.5 * (x0 + x1)
+                ym = 0.5 * (y0 + y1)
+                txt = f"L = {dist:.3f} {self.unit_label}\n(Δx={abs(dx):.3f}, Δy={abs(dy):.3f})"
+                self.caliper_text.set_position((xm, ym))
+                self.caliper_text.set_text(txt)
+
+        self._update_scale_bar()
 
     def set_horizontal_cut(self, row: int):
         if self.image_data is None:
@@ -651,6 +786,14 @@ class SLMImageCanvas(QWidget):
                 self.roi_box = (c_start, r_start, c_curr, r_curr)
                 self._update_overlays()
                 self.canvas.draw_idle()
+            elif self.interaction_mode == "caliper":
+                self.caliper_points = (float(x_start), float(y_start), float(event.xdata), float(event.ydata))
+                self._update_overlays()
+                self.canvas.draw_idle()
+                dx = event.xdata - x_start
+                dy = event.ydata - y_start
+                dist = float(np.hypot(dx, dy))
+                self.caliper_measured.emit(float(x_start), float(y_start), float(event.xdata), float(event.ydata), dist)
 
     def _on_mouse_press(self, event):
         if event.inaxes != self.ax or self.image_data is None:
@@ -669,9 +812,13 @@ class SLMImageCanvas(QWidget):
             if self.is_overlay_mode and self.overlay_data is not None:
                 val_over = float(self.overlay_data[row, col])
                 self.overlay_hovered.emit(col, row, event.xdata, event.ydata, val_over, val)
-        elif self.interaction_mode in ("line", "roi"):
+        elif self.interaction_mode in ("line", "roi", "caliper"):
             self._is_dragging = True
             self._drag_start = (event.xdata, event.ydata)
+            if self.interaction_mode == "caliper":
+                self.caliper_points = (float(event.xdata), float(event.ydata), float(event.xdata), float(event.ydata))
+                self._update_overlays()
+                self.canvas.draw_idle()
 
     def _on_mouse_release(self, event):
         if self._is_dragging:
@@ -680,3 +827,9 @@ class SLMImageCanvas(QWidget):
                 self.line_cut_changed.emit(*self.line_points)
             elif self.interaction_mode == "roi" and self.roi_box:
                 self.roi_changed.emit(*self.roi_box)
+            elif self.interaction_mode == "caliper" and self.caliper_points:
+                x0, y0, x1, y1 = self.caliper_points
+                dx = x1 - x0
+                dy = y1 - y0
+                dist = float(np.hypot(dx, dy))
+                self.caliper_measured.emit(float(x0), float(y0), float(x1), float(y1), dist)
