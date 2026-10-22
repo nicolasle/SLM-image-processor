@@ -67,9 +67,26 @@ The application is tailored for lock-in SLM acquisitions where each scan step co
 
 ### 5. Interactive Inspection Tools
 - **Crosshair Inspection**: Click any pixel to inspect real-time coordinates, pixel indices, and signal value.
-- **1D Line Profile Cut**:
+- **1D Line Profile Cut & Laser Beam $1/e^2$ Size Fitting**:
   - Draw arbitrary cut line across the 2D image, or use quick Horizontal / Vertical mid-cuts.
   - Interactive 1D profile plot showing signal vs distance along the cut with peak/min/mean readouts.
+  - **⚡ Fit Erf (Beam $1/e^2$)**: One-click fitting of the error function ($f(x) = y_0 + m(x-x_0) + A \cdot \text{erf}(\sqrt{2}(x-x_0)/w)$) to knife-edge step transitions.
+  - **Beam Metrics in Current Units ($V$ or $\mu\text{m}$)**:
+    - $1/e^2$ beam radius: $w$
+    - $1/e^2$ beam diameter: $2w$
+    - Full Width at Half Maximum: $\text{FWHM} = \sqrt{2\ln 2}\, w \approx 1.1774\, w$
+    - Beam center position: $x_0$
+    - $10\%-90\%$ knife-edge width ($1.2816\, w$)
+    - Goodness of fit ($R^2$, RMSE)
+    - If in Volts, automatically displays the calibrated micron size equivalent based on the active microscope objective.
+  - **Visual Overlays**: Fitted Erf curve, vertical beam center line, and shaded $1/e^2$ diameter span overlaid directly on the canvas.
+  - **Dual-View & Gaussian Profile Dialog (`ℹ Details...`)**:
+    - Select channel to fit (e.g. active signal vs photodiode reflection baseline).
+    - Toggle linear background drift slope ($m \cdot x$).
+    - Restrict fit to specific $X$ sub-range.
+    - Inspect the physical Gaussian laser beam intensity profile $I(x) = \frac{d}{dx}\text{Erf}(x)$ with $1/e^2$ and FWHM markers.
+    - Copy formatted report to clipboard or export fitted curves to CSV.
+  - **Auto-fit Toggle**: Automatically refits and updates beam parameters whenever a new line cut is drawn.
 - **ROI Selection**:
   - Drag a rectangular region of interest to inspect live metrics: Mean, Std Dev, Min, Max, Peak-to-Peak, and Pixel Count.
 

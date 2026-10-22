@@ -7,6 +7,7 @@ from slm_processor.widgets.dual_view import SLMDualView
 from slm_processor.widgets.overlay_view import SLMOverlayView
 from slm_processor.widgets.channel_manager_dialog import SLMChannelManagerDialog
 from slm_processor.widgets.hermitian_dialog import SLMHermitianDialog
+from slm_processor.widgets.erf_fit_dialog import SLMErfFitDialog
 
 __all__ = [
     "SLMImageCanvas",
@@ -16,4 +17,5 @@ __all__ = [
     "SLMOverlayView",
     "SLMChannelManagerDialog",
     "SLMHermitianDialog",
+    "SLMErfFitDialog",
 ]

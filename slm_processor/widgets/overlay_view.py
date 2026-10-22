@@ -155,7 +155,8 @@ class SLMOverlayView(QWidget):
         y_coords: np.ndarray,
         unit: str = "V",
         phase_deg: float = 0.0,
-        proc_fct=None
+        proc_fct=None,
+        calib_um_per_v: Optional[float] = None
     ):
         self.current_scan = scan
         self.x_coords = x_coords
@@ -163,6 +164,7 @@ class SLMOverlayView(QWidget):
         self.unit_label = unit
         self.phase_deg = phase_deg
         self.proc_fct = proc_fct
+        self.calib_um_per_v = calib_um_per_v
 
         # Ensure channel dropdowns match the scan
         if self.combo_over_channel.count() != len(scan.available_channels):
@@ -260,7 +262,8 @@ class SLMOverlayView(QWidget):
             values_pr=vals_over,
             values_pd=vals_base,
             unit=self.unit_label,
-            title=f"Cut: {over_name} & {base_name} from ({c0:.0f}, {r0:.0f}) to ({c1:.0f}, {r1:.0f})"
+            title=f"Cut: {over_name} & {base_name} from ({c0:.0f}, {r0:.0f}) to ({c1:.0f}, {r1:.0f})",
+            calib_um_per_v=getattr(self, "calib_um_per_v", None)
         )
 
     def _on_overlay_hovered(self, col: int, row: int, x: float, y: float, val_over: float, val_base: float):

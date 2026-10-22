@@ -956,7 +956,8 @@ class SLMMainWindow(QMainWindow):
             y_coords=y_coords,
             unit=unit,
             phase_deg=phase_deg,
-            proc_fct=self._get_processed_image
+            proc_fct=self._get_processed_image,
+            calib_um_per_v=self.calib_x_scale
         )
 
     def _apply_contrast(self, image: np.ndarray):
@@ -1001,12 +1002,14 @@ class SLMMainWindow(QMainWindow):
             )
             self.canvas_profile.set_dual_profile(
                 distances_phys, values, values_base, unit=unit,
-                title=f"Cut: PR on PD from ({c0:.0f}, {r0:.0f}) to ({c1:.0f}, {r1:.0f})"
+                title=f"Cut: PR on PD from ({c0:.0f}, {r0:.0f}) to ({c1:.0f}, {r1:.0f})",
+                calib_um_per_v=self.calib_x_scale
             )
         else:
             self.canvas_profile.set_profile(
                 distances_phys, values, unit=unit,
-                title=f"Cut from ({c0:.0f}, {r0:.0f}) to ({c1:.0f}, {r1:.0f})"
+                title=f"Cut from ({c0:.0f}, {r0:.0f}) to ({c1:.0f}, {r1:.0f})",
+                calib_um_per_v=self.calib_x_scale
             )
 
     def _update_roi_stats(self, c0: int, r0: int, c1: int, r1: int):
