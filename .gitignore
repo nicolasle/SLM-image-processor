@@ -1,0 +1,44 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyd
+.Python
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.spyderproject
+.spyproject
+
+# Large microscopy data files & directories (SLM experimental scans)
+SLM_images/
+data_*/
+*.tiff
+*.tif
+*.log
+*.dat
+*.csv_temp
+*.h5
+*.hdf5
+*.npy
+*.npz
+
+# Operating System specific
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Windows shortcuts generated locally (can be recreated via create_shortcuts.py)
+*.lnk
