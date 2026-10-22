@@ -226,6 +226,11 @@ class SLMOverlayView(QWidget):
         else:
             title = f"Scan: {self.current_scan.step_name} | {over_name} on {base_name} (α={self.alpha_val*100:.0f}%)"
 
+        v_b0 = float(np.percentile(base_img, 1.0))
+        v_b1 = float(np.percentile(base_img, 99.0))
+        v_o0 = float(np.percentile(over_img, 1.0))
+        v_o1 = float(np.percentile(over_img, 99.0))
+
         self.canvas_2d.set_overlay_data(
             base_image=base_img,
             overlay_image=over_img,
@@ -236,7 +241,11 @@ class SLMOverlayView(QWidget):
             y_coords=self.y_coords,
             unit=self.unit_label,
             title=title,
-            cbar_alpha=is_cbar_alpha
+            clim_overlay=(v_o0, v_o1),
+            clim_base=(v_b0, v_b1),
+            cbar_alpha=is_cbar_alpha,
+            base_channel_name=base_name,
+            overlay_channel_name=over_name
         )
 
         if self.canvas_2d.line_points:

@@ -62,6 +62,8 @@ class SLMImageCanvas(QWidget):
         self.clim: Optional[Tuple[float, float]] = None
         self.clim_overlay: Optional[Tuple[float, float]] = None
         self.aspect_mode: str = "physical"  # "physical", "square", "fill"
+        self.base_channel_name: str = "Photodiode"
+        self.overlay_channel_name: str = "Photoresponse"
 
         # Setup figure with compressed layout: guarantees mathematical centering with colorbar
         self.fig = Figure(figsize=(5, 5), dpi=100, layout="compressed")
@@ -168,7 +170,10 @@ class SLMImageCanvas(QWidget):
         unit: str = "V",
         title: Optional[str] = None,
         clim_overlay: Optional[Tuple[float, float]] = None,
-        cbar_alpha: bool = False
+        clim_base: Optional[Tuple[float, float]] = None,
+        cbar_alpha: bool = False,
+        base_channel_name: str = "Photodiode",
+        overlay_channel_name: str = "Photoresponse"
     ):
         """Sets two-layer overlay data: base_image (PD) and overlay_image (PR)."""
         self.is_overlay_mode = True
@@ -179,6 +184,10 @@ class SLMImageCanvas(QWidget):
         self.base_cmap = base_cmap
         self.overlay_cmap = overlay_cmap
         self.clim_overlay = clim_overlay
+        if clim_base is not None:
+            self.clim = clim_base
+        self.base_channel_name = base_channel_name
+        self.overlay_channel_name = overlay_channel_name
 
         rows, cols = base_image.shape
         if x_coords is None or len(x_coords) != cols:
@@ -234,6 +243,18 @@ class SLMImageCanvas(QWidget):
             # Reset _alpha to avoid Matplotlib ValueError when changing from array to scalar
             self.overlay_artist._alpha = None
             self.overlay_artist.set_alpha(eff_alpha)
+
+            # Update colorbar to match visible dominant layer
+            if self.cbar is not None and self.is_overlay_mode:
+                if self.overlay_alpha <= 1e-4 and self.im_artist is not None:
+                    self.cbar.update_normal(self.im_artist)
+                    base_lbl = getattr(self, "base_channel_name", "Base")
+                    self.cbar.set_label(f"Base: {base_lbl}", color="#aaaaaa", fontsize=8)
+                elif self.overlay_alpha > 1e-4:
+                    self.cbar.update_normal(self.overlay_artist)
+                    over_lbl = getattr(self, "overlay_channel_name", "Overlay")
+                    self.cbar.set_label(f"Overlay: {over_lbl}", color="#aaaaaa", fontsize=8)
+
             self.canvas.draw_idle()
 
     def set_overlay_cbar_alpha(self, enabled: bool):
@@ -249,7 +270,7 @@ class SLMImageCanvas(QWidget):
     set_overlay_alpha_gradient = set_overlay_cbar_alpha
 
     def set_clim(self, vmin: Optional[float], vmax: Optional[float]):
-        """Sets display color limits for active image."""
+        """Sets display color limits for base/active image."""
         if vmin is not None and vmax is not None and vmin < vmax:
             self.clim = (vmin, vmax)
         else:
@@ -259,8 +280,28 @@ class SLMImageCanvas(QWidget):
                 self.im_artist.set_clim(self.clim[0], self.clim[1])
             else:
                 self.im_artist.autoscale()
-            if self.cbar is not None and not self.is_overlay_mode:
-                self.cbar.update_normal(self.im_artist)
+            if self.cbar is not None:
+                if not self.is_overlay_mode or self.overlay_alpha <= 1e-4:
+                    self.cbar.update_normal(self.im_artist)
+            self.canvas.draw_idle()
+
+    def set_clim_overlay(self, vmin: Optional[float], vmax: Optional[float]):
+        """Sets display color limits for overlay image layer."""
+        if vmin is not None and vmax is not None and vmin < vmax:
+            self.clim_overlay = (vmin, vmax)
+        else:
+            self.clim_overlay = None
+        if self.overlay_artist is not None:
+            if self.clim_overlay is not None:
+                self.overlay_artist.set_clim(self.clim_overlay[0], self.clim_overlay[1])
+            else:
+                self.overlay_artist.autoscale()
+            if self.cbar is not None and self.is_overlay_mode and self.overlay_alpha > 1e-4:
+                self.cbar.update_normal(self.overlay_artist)
+            if self.overlay_cbar_alpha:
+                eff_alpha = self._compute_effective_alpha()
+                self.overlay_artist._alpha = None
+                self.overlay_artist.set_alpha(eff_alpha)
             self.canvas.draw_idle()
 
     def set_colormap(self, cmap_name: str):
@@ -387,8 +428,11 @@ class SLMImageCanvas(QWidget):
 
         if self.is_overlay_mode and self.overlay_data is not None:
             # Base layer (Photodiode)
-            v_b0 = float(np.percentile(self.image_data, 1.0))
-            v_b1 = float(np.percentile(self.image_data, 99.0))
+            if self.clim is not None:
+                v_b0, v_b1 = self.clim
+            else:
+                v_b0 = float(np.percentile(self.image_data, 1.0))
+                v_b1 = float(np.percentile(self.image_data, 99.0))
             self.im_artist = self.ax.imshow(
                 self.image_data,
                 extent=extent,
@@ -418,8 +462,12 @@ class SLMImageCanvas(QWidget):
                 vmax=v_o1,
                 interpolation="nearest"
             )
-            cbar_target = self.overlay_artist
-            cbar_label = "Photoresponse (Overlay)"
+            if self.overlay_alpha <= 1e-4:
+                cbar_target = self.im_artist
+                cbar_label = f"Base: {getattr(self, 'base_channel_name', 'Photodiode')}"
+            else:
+                cbar_target = self.overlay_artist
+                cbar_label = f"Overlay: {getattr(self, 'overlay_channel_name', 'Photoresponse')}"
         else:
             self.overlay_artist = None
             vmin = self.clim[0] if self.clim else None

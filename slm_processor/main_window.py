@@ -1049,6 +1049,9 @@ class SLMMainWindow(QMainWindow):
             else:
                 title = f"Scan: {scan.step_name} | {top_name} on {base_name} (α={alpha*100:.0f}%)"
 
+            clim_b = self._calc_contrast_limits(base_img)
+            clim_o = self._calc_contrast_limits(over_img)
+
             self.canvas_2d.set_overlay_data(
                 base_image=base_img,
                 overlay_image=over_img,
@@ -1059,9 +1062,13 @@ class SLMMainWindow(QMainWindow):
                 y_coords=y_coords,
                 unit=unit,
                 title=title,
-                cbar_alpha=is_cbar
+                clim_overlay=clim_o,
+                clim_base=clim_b,
+                cbar_alpha=is_cbar,
+                base_channel_name=base_name,
+                overlay_channel_name=top_name
             )
-            self._apply_contrast(over_img)
+            self._apply_contrast()
         else:
             processed = self._get_processed_image(scan, channel_key, phase_deg)
             self.current_processed_data = processed
@@ -1096,7 +1103,9 @@ class SLMMainWindow(QMainWindow):
                 calib_um_per_v=self.calib_x_scale
             )
 
-    def _apply_contrast(self, image: np.ndarray):
+    def _calc_contrast_limits(self, image: Optional[np.ndarray]) -> Optional[Tuple[float, float]]:
+        if image is None:
+            return None
         mode = self.combo_contrast.currentText()
         if mode == "Min-Max":
             vmin = float(np.min(image))
@@ -1111,9 +1120,27 @@ class SLMMainWindow(QMainWindow):
             vmin = float(np.percentile(image, 5.0))
             vmax = float(np.percentile(image, 95.0))
         else:
-            vmin, vmax = None, None
-        
-        self.canvas_2d.set_clim(vmin, vmax)
+            return None
+        return (vmin, vmax)
+
+    def _apply_contrast(self, image: Optional[np.ndarray] = None):
+        if self._get_current_channel_key() == "OVERLAY":
+            if self.current_base_data is not None:
+                clim_b = self._calc_contrast_limits(self.current_base_data)
+                if clim_b is not None:
+                    self.canvas_2d.set_clim(clim_b[0], clim_b[1])
+            if self.current_processed_data is not None:
+                clim_o = self._calc_contrast_limits(self.current_processed_data)
+                if clim_o is not None:
+                    self.canvas_2d.set_clim_overlay(clim_o[0], clim_o[1])
+        else:
+            target = image if image is not None else self.current_processed_data
+            if target is not None:
+                clim = self._calc_contrast_limits(target)
+                if clim is not None:
+                    self.canvas_2d.set_clim(clim[0], clim[1])
+                else:
+                    self.canvas_2d.set_clim(None, None)
 
     def _update_line_profile(self, c0: float, r0: float, c1: float, r1: float):
         if self.current_processed_data is None or not self.dataset:
@@ -1333,8 +1360,7 @@ class SLMMainWindow(QMainWindow):
         self.canvas_2d.set_colormap(cmap_name)
 
     def _on_contrast_changed(self, _):
-        if self.current_processed_data is not None:
-            self._apply_contrast(self.current_processed_data)
+        self._apply_contrast()
 
     def _on_units_changed(self, idx: int):
         self.calib_unit = "um" if idx == 1 else "V"
@@ -1464,18 +1490,19 @@ class SLMMainWindow(QMainWindow):
             top_name = self.combo_overlay_pr_chan.currentText()
             base_name = self.combo_overlay_pd_chan.currentText()
             val_base = float(self.current_base_data[row, col])
+            val_top = float(self.current_processed_data[row, col]) if self.current_processed_data is not None else val
             if (
                 self.chk_overlay_cbar_alpha.isChecked()
                 and hasattr(self, "current_processed_data")
                 and self.current_processed_data is not None
             ):
-                if self.canvas_2d.clim is not None:
-                    v0, v1 = self.canvas_2d.clim
+                if self.canvas_2d.clim_overlay is not None:
+                    v0, v1 = self.canvas_2d.clim_overlay
                 else:
                     v0 = float(np.percentile(self.current_processed_data, 1.0))
                     v1 = float(np.percentile(self.current_processed_data, 99.0))
                 span = float(v1 - v0)
-                norm = float(np.clip((val - v0) / span, 0.0, 1.0)) if abs(span) > 1e-15 else 0.0
+                norm = float(np.clip((val_top - v0) / span, 0.0, 1.0)) if abs(span) > 1e-15 else 0.0
                 local_pct = norm * self.slider_overlay_alpha.value()
                 alpha_str = f"α={local_pct:.0f}% (Cbar Min 0% → Max {self.slider_overlay_alpha.value()}%)"
             else:
@@ -1483,10 +1510,10 @@ class SLMMainWindow(QMainWindow):
 
             self.lbl_cursor_val.setText(
                 f"Cursor: ({x:.3f} {self.calib_unit}, {y:.3f} {self.calib_unit}) [c={col}, r={row}] "
-                f"{top_name}: {val:.4e} | {base_name}: {val_base:.4e} ({alpha_str})"
+                f"{top_name}: {val_top:.4e} | {base_name}: {val_base:.4e} ({alpha_str})"
             )
             self.statusBar.showMessage(
-                f"X: {x:.4f} {self.calib_unit} | Y: {y:.4f} {self.calib_unit} | {top_name}: {val:.4e} | {base_name}: {val_base:.4e}"
+                f"X: {x:.4f} {self.calib_unit} | Y: {y:.4f} {self.calib_unit} | {top_name}: {val_top:.4e} | {base_name}: {val_base:.4e}"
             )
         else:
             self.lbl_cursor_val.setText(
