@@ -760,7 +760,21 @@ class SLMMainWindow(QMainWindow):
         if not self.dataset:
             QMessageBox.information(self, "No Dataset", "Please open a dataset first.")
             return
-        dlg = SLMChannelManagerDialog(self.dataset, self)
+
+        all_ds = {}
+        if self.dataset_harmonics:
+            all_ds[f"Harmonics Domain ({len(self.dataset_harmonics)} harmonics)"] = self.dataset_harmonics
+        if self.dataset_timedomain:
+            all_ds[f"Time Domain ({len(self.dataset_timedomain)} time slices)"] = self.dataset_timedomain
+
+        if not all_ds and self.dataset:
+            name = os.path.basename(self.dataset.root_dir) if self.dataset.root_dir else "Active Dataset"
+            all_ds[f"{name} ({len(self.dataset)} scans)"] = self.dataset
+        elif self.dataset and self.dataset not in all_ds.values():
+            name = os.path.basename(self.dataset.root_dir) if self.dataset.root_dir else "Active Dataset"
+            all_ds[f"{name} ({len(self.dataset)} scans)"] = self.dataset
+
+        dlg = SLMChannelManagerDialog(self.dataset, self, all_datasets=all_ds)
         dlg.channels_updated.connect(self._on_channels_updated)
         dlg.exec()
 

@@ -25,8 +25,10 @@ The application is tailored for lock-in SLM acquisitions where each scan step co
   - Phase: $\theta = \text{atan2}(Y, X)$
   - Phase-Rotated: $X'(\phi) = X \cos\phi + Y \sin\phi$ and $Y'(\phi) = -X \sin\phi + Y \cos\phi$
 - **Channel Manager Dialog** (`Ctrl+M` or Tools menu):
-  - View all raw and derived channels in the dataset.
-  - **Create Lock-in Pair**: Select any two channels to act as $X$ and $Y$.
+  - **Hierarchical Subfolder Tree**: Organized by Dataset, with dedicated collapsible subfolders for **Raw Channels** (direct TIFF image scans on disk) and **Derived Channels** (further grouped into Lock-in Pairs, Ratios, Differences, and Custom quantities).
+  - **Multi-Dataset Support**: Seamlessly displays both Harmonics Domain and Time Domain datasets when transformed.
+  - **Live Filter**: Instant search bar to filter channels across all subfolders.
+  - **Create Lock-in Pair**: Select any two channels to act as $X$ and $Y$ and automatically generate $R$, $\theta$, and rotated components $X', Y'$.
   - **Create Ratio Channel**: Compute $A / B$ (e.g. signal normalized by laser power or reflection).
   - **Create Difference Channel**: Compute $A - B$ (e.g. background subtraction or differential contrast).
 

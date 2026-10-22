@@ -132,6 +132,7 @@ def run_tests():
     # Test multi-channel handler & arbitrary derived channels
     from slm_processor.widgets.channel_manager_dialog import SLMChannelManagerDialog
     dlg = SLMChannelManagerDialog(window.dataset)
+    assert dlg.tree_channels.topLevelItemCount() > 0
     assert dlg.list_channels.count() > 0
     dlg.close()
 
