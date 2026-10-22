@@ -38,7 +38,8 @@ class SLMDualView(QWidget):
         self.combo_left.currentIndexChanged.connect(self._on_channel_selection_changed)
         
         self.combo_left_cmap = QComboBox()
-        self.combo_left_cmap.addItems(["gray", "cividis", "bone", "Greys_r", "viridis", "inferno", "coolwarm"])
+        self.combo_left_cmap.addItems(["cividis", "gray", "bone", "Greys_r", "viridis", "inferno", "coolwarm"])
+        self.combo_left_cmap.setCurrentText("cividis")
         self.combo_left_cmap.currentTextChanged.connect(self._on_left_cmap_changed)
 
         # Right view (View 2)

@@ -42,7 +42,7 @@ class SLMImageCanvas(QWidget):
 
         self.x_coords: Optional[np.ndarray] = None  # columns (volts or um)
         self.y_coords: Optional[np.ndarray] = None  # rows (volts or um)
-        self.unit_label: str = "V"
+        self.unit_label: str = "µm"
 
         # Interactive mode: "navigate", "crosshair", "line", "roi"
         self.interaction_mode = "crosshair"
@@ -56,7 +56,7 @@ class SLMImageCanvas(QWidget):
         self._is_dragging = False
 
         # Visual settings
-        self.cmap_name = "viridis"
+        self.cmap_name = "cividis"
         self.origin = "lower"
         self.invert_y = False
         self.clim: Optional[Tuple[float, float]] = None

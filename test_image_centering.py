@@ -21,7 +21,7 @@ def test_centering():
 
     app = QApplication.instance() or QApplication(sys.argv)
     window = SLMMainWindow(initial_dir="SLM_images")
-    window.resize(1200, 800)
+    window.resize(1600, 900)
     window.show()
     QTest.qWait(100)
 
@@ -118,8 +118,10 @@ def test_centering():
     canvas.btn_center.click()
     QTest.qWait(50)
     full_xlim = canvas.ax.get_xlim()
-    assert np.isclose(full_xlim[0], -0.4, atol=1e-2)
-    assert np.isclose(full_xlim[1], 0.4, atol=1e-2)
+    expected_x0 = float(canvas.x_coords[0])
+    expected_x1 = float(canvas.x_coords[-1])
+    assert np.isclose(full_xlim[0], expected_x0, atol=1e-2)
+    assert np.isclose(full_xlim[1], expected_x1, atol=1e-2)
     print(f"[OK] Center button restored full extent: xlim={full_xlim}")
 
     print("\n=======================================================")

@@ -161,7 +161,7 @@ class SLMMainWindow(QMainWindow):
     def __init__(self, initial_dir: Optional[str] = None):
         super().__init__()
         self.setWindowTitle("Scanning Laser Microscopy Image Processor")
-        self.resize(1360, 880)
+        self.resize(1600, 900)
         self.setStyleSheet(DARK_STYLE)
 
         icon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app_icon.ico")
@@ -177,9 +177,10 @@ class SLMMainWindow(QMainWindow):
         self.current_processed_data: Optional[np.ndarray] = None
 
         # Coordinates calibration (Default 50x objective from LSM.py)
-        self.calib_unit = "V"  # "V" or "um"
         self.calib_x_scale = 62.166693  # um per Volt
         self.calib_y_scale = 64.654161  # um per Volt
+        has_calib = self.calib_x_scale > 0 and self.calib_y_scale > 0
+        self.calib_unit = "um" if has_calib else "V"
 
         # Leveling & filters state
         self.plane_level_mode = "None"
@@ -188,7 +189,7 @@ class SLMMainWindow(QMainWindow):
         self.filter_param = 1.0
 
         # Contrast state
-        self.contrast_mode = "1%-99%"
+        self.contrast_mode = "Min-Max"
 
         # Active tool
         self.active_tool_mode = "crosshair"
@@ -287,8 +288,8 @@ class SLMMainWindow(QMainWindow):
         # Left control sidebar in a scroll area with adjustable width
         sidebar_scroll = QScrollArea()
         sidebar_scroll.setWidgetResizable(True)
-        sidebar_scroll.setMinimumWidth(260)
-        sidebar_scroll.setMaximumWidth(700)
+        sidebar_scroll.setMinimumWidth(300)
+        sidebar_scroll.setMaximumWidth(1200)
         sidebar_scroll.setFrameShape(QFrame.Shape.NoFrame)
 
         sidebar_content = QWidget()
@@ -448,19 +449,24 @@ class SLMMainWindow(QMainWindow):
 
         disp_layout.addWidget(QLabel("Colormap:"), 0, 0)
         self.combo_cmap = QComboBox()
-        self.combo_cmap.addItems(["viridis", "inferno", "plasma", "magma", "cividis", "turbo", "coolwarm", "bwr", "gray"])
+        self.combo_cmap.addItems(["cividis", "viridis", "inferno", "plasma", "magma", "turbo", "coolwarm", "bwr", "gray"])
+        self.combo_cmap.setCurrentText("cividis")
         self.combo_cmap.currentTextChanged.connect(self._on_cmap_changed)
         disp_layout.addWidget(self.combo_cmap, 0, 1)
 
         disp_layout.addWidget(QLabel("Contrast:"), 1, 0)
         self.combo_contrast = QComboBox()
-        self.combo_contrast.addItems(["1%-99%", "2%-98%", "5%-95%", "Min-Max", "Manual"])
+        self.combo_contrast.addItems(["Min-Max", "1%-99%", "2%-98%", "5%-95%", "Manual"])
+        self.combo_contrast.setCurrentText("Min-Max")
         self.combo_contrast.currentIndexChanged.connect(self._on_contrast_changed)
         disp_layout.addWidget(self.combo_contrast, 1, 1)
 
         disp_layout.addWidget(QLabel("Axis Units:"), 2, 0)
         self.combo_units = QComboBox()
         self.combo_units.addItems(["Mirror Volts (V)", "Physical Distance (µm)"])
+        # Default to Physical Distance (µm) if calibration available (Index 1), else Volts (Index 0)
+        default_unit_idx = 1 if (self.calib_x_scale > 0 and self.calib_y_scale > 0) else 0
+        self.combo_units.setCurrentIndex(default_unit_idx)
         self.combo_units.currentIndexChanged.connect(self._on_units_changed)
         disp_layout.addWidget(self.combo_units, 2, 1)
 
@@ -749,18 +755,33 @@ class SLMMainWindow(QMainWindow):
 
         self.tabs.currentChanged.connect(self._on_tab_changed)
 
-        # Resizable horizontal splitter layout
+        # Ensure tabs and children don't block left panel resizing
+        self.tabs.setMinimumWidth(400)
+        for i in range(self.tabs.count()):
+            tab_w = self.tabs.widget(i)
+            if tab_w is not None:
+                tab_w.setMinimumWidth(400)
+
+        # Resizable horizontal splitter layout: left panel is 1.7x larger (578px vs 340px)
         self.main_splitter.addWidget(sidebar_scroll)
         self.main_splitter.addWidget(self.tabs)
-        self.main_splitter.setSizes([340, 1020])
         self.main_splitter.setStretchFactor(0, 0)
         self.main_splitter.setStretchFactor(1, 1)
+        self.main_splitter.setSizes([578, 1022])
         main_layout.addWidget(self.main_splitter)
 
         # Status Bar
         self.statusBar = QStatusBar()
         self.setStatusBar(self.statusBar)
         self.statusBar.showMessage("Ready. Load a dataset folder or single scan folder to begin.")
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not getattr(self, "_splitter_initialized", False):
+            self._splitter_initialized = True
+            left_w = 578
+            right_w = max(500, self.main_splitter.width() - left_w)
+            self.main_splitter.setSizes([left_w, right_w])
 
     # --- Loading Logic ---
 

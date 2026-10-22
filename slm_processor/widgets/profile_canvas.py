@@ -138,6 +138,7 @@ class SLMProfileCanvas(QWidget):
         layout.addWidget(self.canvas)
 
         self.line_artist, = self.ax.plot([], [], color="#ff3366", linewidth=1.5, marker=".", markersize=3)
+        self.setMinimumWidth(300)
         self._setup_axes()
 
     def _setup_axes(self):
