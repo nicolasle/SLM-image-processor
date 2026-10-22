@@ -199,7 +199,10 @@ class SLMProfileCanvas(QWidget):
 
         self.ax.relim()
         self.ax.autoscale_view()
-        self.fig.tight_layout()
+        try:
+            self.fig.tight_layout()
+        except Exception:
+            pass
         self.canvas.draw_idle()
 
         # Handle auto-fit
@@ -216,7 +219,9 @@ class SLMProfileCanvas(QWidget):
         values_pd: np.ndarray,
         unit: str = "V",
         title: str = "1D Profile: PR on PD",
-        calib_um_per_v: Optional[float] = None
+        calib_um_per_v: Optional[float] = None,
+        label_pr: str = "PR Signal",
+        label_pd: str = "PD Baseline"
     ):
         self.distances = distances
         self.values = values_pr
@@ -225,6 +230,10 @@ class SLMProfileCanvas(QWidget):
         self.calib_um_per_v = calib_um_per_v
         self.title_label.setText(title)
         self.combo_fit_channel.setVisible(True)
+        self.combo_fit_channel.blockSignals(True)
+        self.combo_fit_channel.setItemText(0, f"Fit: {label_pr}")
+        self.combo_fit_channel.setItemText(1, f"Fit: {label_pd}")
+        self.combo_fit_channel.blockSignals(False)
 
         self._clear_fit_artists()
 
@@ -235,22 +244,22 @@ class SLMProfileCanvas(QWidget):
         self.ax.clear()
         self.ax.set_facecolor("#1e1e1e")
         self._setup_axes()
-        self.ax.set_ylabel("PR Signal (V)", color="#ff3366", fontsize=9)
+        self.ax.set_ylabel(f"{label_pr} ({unit})", color="#ff3366", fontsize=9)
         self.ax.tick_params(axis="y", colors="#ff3366", labelsize=8)
 
         self.line_pr, = self.ax.plot(
-            distances, values_pr, color="#ff3366", linewidth=1.8, marker=".", markersize=3, label="PR Signal"
+            distances, values_pr, color="#ff3366", linewidth=1.8, marker=".", markersize=3, label=label_pr
         )
         self.line_artist = self.line_pr
 
         self.ax_twin = self.ax.twinx()
-        self.ax_twin.set_ylabel("PD Baseline (V)", color="#00ffcc", fontsize=9)
+        self.ax_twin.set_ylabel(f"{label_pd} ({unit})", color="#00ffcc", fontsize=9)
         self.ax_twin.tick_params(axis="y", colors="#00ffcc", labelsize=8)
         for spine in self.ax_twin.spines.values():
             spine.set_color("#555555")
 
         self.line_pd, = self.ax_twin.plot(
-            distances, values_pd, color="#00ffcc", linewidth=1.5, linestyle="--", label="PD Baseline"
+            distances, values_pd, color="#00ffcc", linewidth=1.5, linestyle="--", label=label_pd
         )
 
         lines = [self.line_pr, self.line_pd]
@@ -259,13 +268,16 @@ class SLMProfileCanvas(QWidget):
 
         pr_max = float(np.max(values_pr))
         pd_mean = float(np.mean(values_pd))
-        self.stats_label.setText(f"PR Peak: {pr_max:.3e} | PD Mean: {pd_mean:.3e}")
+        self.stats_label.setText(f"{label_pr} Peak: {pr_max:.3e} | {label_pd} Mean: {pd_mean:.3e}")
 
         self.ax.relim()
         self.ax.autoscale_view()
         self.ax_twin.relim()
         self.ax_twin.autoscale_view()
-        self.fig.tight_layout()
+        try:
+            self.fig.tight_layout()
+        except Exception:
+            pass
         self.canvas.draw_idle()
 
         # Handle auto-fit

@@ -157,14 +157,41 @@ def run_tests():
     assert np.isclose(window.canvas_2d.overlay_alpha, 0.55)
     print("Multi-channel creation & arbitrary layer overlap: PASSED")
 
-    # Test tabs including dedicated overlay tab
+    # Test tabs and interactive tools across all windows
     window.tabs.setCurrentIndex(1) # Dual view
     window._update_dual_view()
-    window.tabs.setCurrentIndex(2) # Dedicated Overlay view
-    window.overlay_view.combo_over_channel.setCurrentText("CustomRatio")
-    window.overlay_view.combo_base_channel.setCurrentText("CustomDiff")
-    window.overlay_view.refresh_display()
-    window.tabs.setCurrentIndex(3) # Series
+
+    # Test dual view interactive tools synchronization
+    window.rb_tool_line.setChecked(True)
+    window._on_tool_mode_changed(window.rb_tool_line)
+    assert window.dual_view.active_mode == "line"
+    assert window.dual_view.canvas_left.interaction_mode == "line"
+    assert window.dual_view.canvas_right.interaction_mode == "line"
+
+    # Quick cut in Dual View
+    window._on_quick_hcut()
+    assert window.dual_view.line_points is not None
+    assert window.dual_view.canvas_profile.values is not None
+    assert window.dual_view.canvas_profile.values_pd is not None
+
+    # Quick ROI in Dual View
+    window.rb_tool_roi.setChecked(True)
+    window._on_tool_mode_changed(window.rb_tool_roi)
+    window.dual_view.canvas_left.set_roi(10, 10, 40, 40, emit_signal=True)
+    assert window.dual_view.canvas_right.roi_box == (10, 10, 40, 40)
+    assert window.canvas_2d.roi_box == (10, 10, 40, 40)
+
+    # Test main panel sub-options (Single Channel vs PR on PD Overlay)
+    window.tabs.setCurrentIndex(0)
+    window.btn_sub_single.click()
+    assert window.canvas_2d.is_overlay_mode is False
+    assert window.widget_overlay_inline.isHidden() is True
+
+    window.btn_sub_overlay.click()
+    assert window.canvas_2d.is_overlay_mode is True
+    assert window.widget_overlay_inline.isHidden() is False
+
+    window.tabs.setCurrentIndex(2) # Series trend
     window._update_series_trend()
 
     print("PyQt6 GUI initialization & callbacks: ALL PASSED")

@@ -460,12 +460,15 @@ class SLMImageCanvas(QWidget):
 
     def _create_overlays(self):
         """Creates or recreates line and crosshair artists."""
-        self.crosshair_v = self.ax.axvline(x=0, color="#00ffcc", linestyle="--", linewidth=1.0, alpha=0.8)
-        self.crosshair_h = self.ax.axhline(y=0, color="#00ffcc", linestyle="--", linewidth=1.0, alpha=0.8)
-        self.line_artist, = self.ax.plot([], [], color="#ff3366", marker="o", markersize=3, linewidth=1.5, alpha=0.9)
-        self.roi_patch = patches.Rectangle((0, 0), 0, 0, linewidth=1.5, edgecolor="#ffff00", facecolor="none", linestyle="--", alpha=0.9)
-        self.ax.add_patch(self.roi_patch)
-        self._update_overlays()
+        try:
+            self.crosshair_v = self.ax.axvline(x=0, color="#00ffcc", linestyle="--", linewidth=1.0, alpha=0.8)
+            self.crosshair_h = self.ax.axhline(y=0, color="#00ffcc", linestyle="--", linewidth=1.0, alpha=0.8)
+            self.line_artist, = self.ax.plot([], [], color="#ff3366", marker="o", markersize=3, linewidth=1.5, alpha=0.9)
+            self.roi_patch = patches.Rectangle((0, 0), 0, 0, linewidth=1.5, edgecolor="#ffff00", facecolor="none", linestyle="--", alpha=0.9)
+            self.ax.add_patch(self.roi_patch)
+            self._update_overlays()
+        except (np.linalg.LinAlgError, ValueError):
+            pass
 
     def _pixel_to_coord(self, col: float, row: float) -> Tuple[float, float]:
         if self.x_coords is None or self.y_coords is None or self.image_data is None:
@@ -528,6 +531,28 @@ class SLMImageCanvas(QWidget):
         self._update_overlays()
         self.canvas.draw_idle()
         self.line_cut_changed.emit(*self.line_points)
+
+    def set_line_cut(self, c0: float, r0: float, c1: float, r1: float, emit_signal: bool = False):
+        """Programmatically set line cut coordinates and update visuals."""
+        self.line_points = (float(c0), float(r0), float(c1), float(r1))
+        self._update_overlays()
+        self.canvas.draw_idle()
+        if emit_signal:
+            self.line_cut_changed.emit(*self.line_points)
+
+    def set_roi(self, c0: int, r0: int, c1: int, r1: int, emit_signal: bool = False):
+        """Programmatically set ROI bounding box and update visuals."""
+        self.roi_box = (int(c0), int(r0), int(c1), int(r1))
+        self._update_overlays()
+        self.canvas.draw_idle()
+        if emit_signal:
+            self.roi_changed.emit(*self.roi_box)
+
+    def set_crosshair(self, col: int, row: int):
+        """Programmatically set crosshair position and update visuals."""
+        self.crosshair_pos = (int(col), int(row))
+        self._update_overlays()
+        self.canvas.draw_idle()
 
     def _on_mouse_move(self, event):
         if event.inaxes != self.ax or self.image_data is None:

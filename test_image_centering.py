@@ -79,18 +79,20 @@ def test_centering():
     assert diff_r < 0.05, f"Dual Right Canvas not centered! Diff={diff_r}"
     print("[OK] Both Dual View canvases are symmetrically centered!")
 
-    # 4. Overlay View (Tab 2) Centering
-    print("\n--- TEST 4: Overlay View Centering ---")
-    window.tabs.setCurrentIndex(2)
+    # 4. PR on PD Overlay Centering (Main Panel Suboption)
+    print("\n--- TEST 4: PR on PD Overlay Centering ---")
+    window.tabs.setCurrentIndex(0)
+    window.btn_sub_overlay.click()
     QTest.qWait(50)
-    c_over = window.overlay_view.canvas_2d
+    c_over = window.canvas_2d
     c_over.canvas.draw()
     pos_o = c_over.ax.get_position()
     cb_o = c_over.cbar.ax.get_position()
     diff_o = abs(pos_o.x0 - (1.0 - cb_o.x1))
     print(f"Overlay Canvas: Left={pos_o.x0:.3f}, Right={1.0-cb_o.x1:.3f}, Diff={diff_o:.3f}")
     assert diff_o < 0.05, f"Overlay Canvas not centered! Diff={diff_o}"
-    print("[OK] Overlay View canvas is properly centered!")
+    print("[OK] PR on PD Overlay canvas is properly centered!")
+    window.btn_sub_single.click()
 
     # 5. Dynamic Window Resizing
     print("\n--- TEST 5: Window Resizing Centering ---")

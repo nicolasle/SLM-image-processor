@@ -374,61 +374,6 @@ class SLMMainWindow(QMainWindow):
         chan_layout.addWidget(self.btn_channel_manager)
         sidebar_layout.addWidget(group_chan)
 
-        # --- 3. Multi-Channel Overlay Settings ---
-        group_overlay = QGroupBox("Multi-Channel Overlay & Blending")
-        overlay_grid = QGridLayout(group_overlay)
-        overlay_grid.setContentsMargins(6, 8, 6, 8)
-        overlay_grid.setSpacing(6)
-
-        overlay_grid.addWidget(QLabel("Overlay Alpha (Opacity):"), 0, 0)
-        row_alpha = QHBoxLayout()
-        self.slider_overlay_alpha = QSlider(Qt.Orientation.Horizontal)
-        self.slider_overlay_alpha.setRange(0, 100)
-        self.slider_overlay_alpha.setValue(60)
-        self.slider_overlay_alpha.valueChanged.connect(self._on_sidebar_alpha_slider_changed)
-        self.spin_overlay_alpha = QSpinBox()
-        self.spin_overlay_alpha.setRange(0, 100)
-        self.spin_overlay_alpha.setValue(60)
-        self.spin_overlay_alpha.setSuffix(" %")
-        self.spin_overlay_alpha.valueChanged.connect(self._on_sidebar_alpha_spin_changed)
-        row_alpha.addWidget(self.slider_overlay_alpha, 1)
-        row_alpha.addWidget(self.spin_overlay_alpha)
-        overlay_grid.addLayout(row_alpha, 0, 1)
-
-        self.chk_overlay_cbar_alpha = QCheckBox("Cbar Min α=0 → Max α=1")
-        self.chk_overlay_cbar_alpha.setStyleSheet("color: #00e5ff; font-weight: bold; font-size: 10px;")
-        self.chk_overlay_cbar_alpha.setToolTip(
-            "Sets overlay opacity based on colorbar values: min value is completely transparent (alpha=0) "
-            "and max value is opaque (alpha=1). Shows only meaningful signal on top of base layer."
-        )
-        self.chk_overlay_cbar_alpha.toggled.connect(self._on_overlay_cbar_alpha_toggled)
-        self.chk_overlay_gradient = self.chk_overlay_cbar_alpha
-        overlay_grid.addWidget(self.chk_overlay_cbar_alpha, 1, 0, 1, 2)
-
-        overlay_grid.addWidget(QLabel("Top (Overlay) Layer:"), 2, 0)
-        self.combo_overlay_pr_chan = QComboBox()
-        self.combo_overlay_pr_chan.currentIndexChanged.connect(self._on_overlay_param_changed)
-        overlay_grid.addWidget(self.combo_overlay_pr_chan, 2, 1)
-
-        overlay_grid.addWidget(QLabel("Top Colormap:"), 3, 0)
-        self.combo_overlay_pr_cmap = QComboBox()
-        self.combo_overlay_pr_cmap.addItems(["inferno", "turbo", "plasma", "viridis", "coolwarm", "hot", "magma"])
-        self.combo_overlay_pr_cmap.currentIndexChanged.connect(self._on_overlay_param_changed)
-        overlay_grid.addWidget(self.combo_overlay_pr_cmap, 3, 1)
-
-        overlay_grid.addWidget(QLabel("Bottom (Base) Layer:"), 4, 0)
-        self.combo_overlay_pd_chan = QComboBox()
-        self.combo_overlay_pd_chan.currentIndexChanged.connect(self._on_overlay_param_changed)
-        overlay_grid.addWidget(self.combo_overlay_pd_chan, 4, 1)
-
-        overlay_grid.addWidget(QLabel("Bottom Colormap:"), 5, 0)
-        self.combo_overlay_pd_cmap = QComboBox()
-        self.combo_overlay_pd_cmap.addItems(["gray", "bone", "cividis", "Greys_r", "viridis", "coolwarm"])
-        self.combo_overlay_pd_cmap.currentIndexChanged.connect(self._on_overlay_param_changed)
-        overlay_grid.addWidget(self.combo_overlay_pd_cmap, 5, 1)
-
-        sidebar_layout.addWidget(group_overlay)
-
         # --- 3. Lock-in Phase Rotation ---
         group_phase = QGroupBox("Lock-in Phase Rotation")
         phase_layout = QVBoxLayout(group_phase)
@@ -606,11 +551,165 @@ class SLMMainWindow(QMainWindow):
         # --- Center Central Tabs ---
         self.tabs = QTabWidget()
         
-        # Tab 1: Single Scan View & 1D Profile Cut
+        # Tab 1: Single Scan View & 1D Profile Cut (with Single / PR on PD Overlay suboptions)
         tab_single = QWidget()
         layout_single = QVBoxLayout(tab_single)
         layout_single.setContentsMargins(2, 2, 2, 2)
         layout_single.setSpacing(4)
+
+        # Sub-option control bar for 2D Image Panel (Single Channel vs PR on PD Overlay)
+        self.frame_subopt = QFrame()
+        self.frame_subopt.setObjectName("suboptFrame")
+        self.frame_subopt.setStyleSheet("""
+            QFrame#suboptFrame {
+                background-color: #242424;
+                border: 1px solid #383838;
+                border-radius: 5px;
+                padding: 2px;
+            }
+        """)
+        subopt_vbox = QVBoxLayout(self.frame_subopt)
+        subopt_vbox.setContentsMargins(6, 4, 6, 4)
+        subopt_vbox.setSpacing(4)
+
+        # Row 1: Mode Switch & Status
+        row_sub_mode = QHBoxLayout()
+        row_sub_mode.setContentsMargins(0, 0, 0, 0)
+        row_sub_mode.setSpacing(8)
+
+        lbl_sub_title = QLabel("2D View Mode:")
+        lbl_sub_title.setStyleSheet("font-weight: bold; color: #aaaaaa; font-size: 11px;")
+        row_sub_mode.addWidget(lbl_sub_title)
+
+        self.btn_group_submode = QButtonGroup(self)
+
+        self.btn_sub_single = QPushButton("◉ Single Channel")
+        self.btn_sub_single.setCheckable(True)
+        self.btn_sub_single.setChecked(True)
+        self.btn_sub_single.setStyleSheet("""
+            QPushButton {
+                background-color: #2b2b2b;
+                color: #cccccc;
+                font-weight: bold;
+                padding: 4px 14px;
+                border-radius: 4px;
+                border: 1px solid #444444;
+                font-size: 11px;
+            }
+            QPushButton:hover { background-color: #383838; }
+            QPushButton:checked {
+                background-color: #007acc;
+                color: #ffffff;
+                border: 1px solid #0098ff;
+            }
+        """)
+
+        self.btn_sub_overlay = QPushButton("🔀 PR on PD (Overlay)")
+        self.btn_sub_overlay.setCheckable(True)
+        self.btn_sub_overlay.setStyleSheet("""
+            QPushButton {
+                background-color: #2b2b2b;
+                color: #cccccc;
+                font-weight: bold;
+                padding: 4px 14px;
+                border-radius: 4px;
+                border: 1px solid #444444;
+                font-size: 11px;
+            }
+            QPushButton:hover { background-color: #383838; }
+            QPushButton:checked {
+                background-color: #9c27b0;
+                color: #ffffff;
+                border: 1px solid #ba68c8;
+            }
+        """)
+
+        self.btn_group_submode.addButton(self.btn_sub_single, 0)
+        self.btn_group_submode.addButton(self.btn_sub_overlay, 1)
+        self.btn_group_submode.buttonClicked.connect(self._on_submode_toggled)
+
+        row_sub_mode.addWidget(self.btn_sub_single)
+        row_sub_mode.addWidget(self.btn_sub_overlay)
+        row_sub_mode.addSpacing(15)
+
+        self.lbl_sub_single_info = QLabel("Active Channel: PR_R")
+        self.lbl_sub_single_info.setStyleSheet("color: #4da6ff; font-weight: bold; font-size: 11px;")
+        row_sub_mode.addWidget(self.lbl_sub_single_info)
+        row_sub_mode.addStretch(1)
+        subopt_vbox.addLayout(row_sub_mode)
+
+        # Row 2: Inline PR on PD Overlay Controls
+        self.widget_overlay_inline = QWidget()
+        row_over_ctrl = QHBoxLayout(self.widget_overlay_inline)
+        row_over_ctrl.setContentsMargins(0, 2, 0, 2)
+        row_over_ctrl.setSpacing(6)
+
+        lbl_top = QLabel("Top (PR):")
+        lbl_top.setStyleSheet("color: #ff3366; font-weight: bold; font-size: 11px;")
+        row_over_ctrl.addWidget(lbl_top)
+
+        self.combo_overlay_pr_chan = QComboBox()
+        self.combo_overlay_pr_chan.currentIndexChanged.connect(self._on_overlay_param_changed)
+        row_over_ctrl.addWidget(self.combo_overlay_pr_chan)
+
+        self.combo_overlay_pr_cmap = QComboBox()
+        self.combo_overlay_pr_cmap.addItems(["inferno", "turbo", "plasma", "viridis", "coolwarm", "hot", "magma"])
+        self.combo_overlay_pr_cmap.currentIndexChanged.connect(self._on_overlay_param_changed)
+        row_over_ctrl.addWidget(self.combo_overlay_pr_cmap)
+
+        row_over_ctrl.addSpacing(10)
+
+        lbl_base = QLabel("Base (PD):")
+        lbl_base.setStyleSheet("color: #00ffcc; font-weight: bold; font-size: 11px;")
+        row_over_ctrl.addWidget(lbl_base)
+
+        self.combo_overlay_pd_chan = QComboBox()
+        self.combo_overlay_pd_chan.currentIndexChanged.connect(self._on_overlay_param_changed)
+        row_over_ctrl.addWidget(self.combo_overlay_pd_chan)
+
+        self.combo_overlay_pd_cmap = QComboBox()
+        self.combo_overlay_pd_cmap.addItems(["gray", "bone", "cividis", "Greys_r", "viridis", "coolwarm"])
+        self.combo_overlay_pd_cmap.currentIndexChanged.connect(self._on_overlay_param_changed)
+        row_over_ctrl.addWidget(self.combo_overlay_pd_cmap)
+
+        row_over_ctrl.addSpacing(10)
+
+        lbl_alpha = QLabel("Alpha:")
+        lbl_alpha.setStyleSheet("color: #cccccc; font-weight: bold; font-size: 11px;")
+        row_over_ctrl.addWidget(lbl_alpha)
+
+        self.slider_overlay_alpha = QSlider(Qt.Orientation.Horizontal)
+        self.slider_overlay_alpha.setRange(0, 100)
+        self.slider_overlay_alpha.setValue(60)
+        self.slider_overlay_alpha.setFixedWidth(100)
+        self.slider_overlay_alpha.valueChanged.connect(self._on_sidebar_alpha_slider_changed)
+        row_over_ctrl.addWidget(self.slider_overlay_alpha)
+
+        self.spin_overlay_alpha = QSpinBox()
+        self.spin_overlay_alpha.setRange(0, 100)
+        self.spin_overlay_alpha.setValue(60)
+        self.spin_overlay_alpha.setSuffix(" %")
+        self.spin_overlay_alpha.setFixedWidth(55)
+        self.spin_overlay_alpha.valueChanged.connect(self._on_sidebar_alpha_spin_changed)
+        row_over_ctrl.addWidget(self.spin_overlay_alpha)
+
+        row_over_ctrl.addSpacing(10)
+
+        self.chk_overlay_cbar_alpha = QCheckBox("Cbar Min α=0 → Max α=1")
+        self.chk_overlay_cbar_alpha.setStyleSheet("color: #00e5ff; font-weight: bold; font-size: 11px;")
+        self.chk_overlay_cbar_alpha.setToolTip(
+            "Sets overlay opacity based on colorbar values: min value is completely transparent (alpha=0) "
+            "and max value is opaque (alpha=1). Shows only meaningful signal on top of base layer."
+        )
+        self.chk_overlay_cbar_alpha.toggled.connect(self._on_overlay_cbar_alpha_toggled)
+        self.chk_overlay_gradient = self.chk_overlay_cbar_alpha
+        row_over_ctrl.addWidget(self.chk_overlay_cbar_alpha)
+
+        row_over_ctrl.addStretch(1)
+        self.widget_overlay_inline.setVisible(False)
+        subopt_vbox.addWidget(self.widget_overlay_inline)
+
+        layout_single.addWidget(self.frame_subopt)
 
         splitter_v = QSplitter(Qt.Orientation.Vertical)
         self.canvas_2d = SLMImageCanvas(self, title="Scanning Laser Microscopy Image")
@@ -626,18 +725,19 @@ class SLMMainWindow(QMainWindow):
         layout_single.addWidget(splitter_v)
         self.tabs.addTab(tab_single, "2D Image & 1D Cut")
 
-        # Tab 2: Dual Side-by-Side Comparison View
+        # Tab 2: Dual Side-by-Side Comparison View (with synchronized interactive tools)
         self.dual_view = SLMDualView(self)
         self.dual_view.channel_changed.connect(self._update_dual_view)
+        self.dual_view.line_cut_changed.connect(self._on_dual_line_cut_changed)
+        self.dual_view.roi_changed.connect(self._on_dual_roi_changed)
         self.tabs.addTab(self.dual_view, "Dual View (Side-by-Side)")
 
-        # Tab 3: Dedicated PR on PD Overlay View
+        # Standalone overlay view instance kept alive for compatibility
         self.overlay_view = SLMOverlayView(self)
         self.overlay_view.alpha_changed.connect(self._sync_alpha_from_view)
         self.overlay_view.gradient_changed.connect(self._sync_gradient_from_view)
-        self.tabs.addTab(self.overlay_view, "PR on PD Overlay")
 
-        # Tab 4: Series Analysis
+        # Tab 3: Series Analysis
         tab_series = QWidget()
         layout_series = QVBoxLayout(tab_series)
         layout_series.setContentsMargins(4, 4, 4, 4)
@@ -863,8 +963,10 @@ class SLMMainWindow(QMainWindow):
     # --- Data Retrieval & Processing Pipeline ---
 
     def _get_current_channel_key(self) -> str:
+        if hasattr(self, "btn_sub_overlay") and self.btn_sub_overlay.isChecked():
+            return "OVERLAY"
         text = self.combo_channel.currentText()
-        if "Overlay" in text:
+        if "Overlay" in text or "OVERLAY" in text:
             return "OVERLAY"
         return text if text else "PR_R"
 
@@ -967,6 +1069,8 @@ class SLMMainWindow(QMainWindow):
             title = f"Scan: {scan.step_name} | {self.combo_channel.currentText()}"
             self.canvas_2d.set_data(processed, x_coords, y_coords, unit=unit, title=title)
             self._apply_contrast(processed)
+            if hasattr(self, "lbl_sub_single_info"):
+                self.lbl_sub_single_info.setText(f"Active Channel: {self.combo_channel.currentText()}")
 
         # Update 1D line cut
         if self.canvas_2d.line_points is not None:
@@ -980,16 +1084,17 @@ class SLMMainWindow(QMainWindow):
         if self.tabs.currentIndex() == 1:
             self._update_dual_view()
 
-        # Update overlay view tab
-        self.overlay_view.set_scan_data(
-            scan=scan,
-            x_coords=x_coords,
-            y_coords=y_coords,
-            unit=unit,
-            phase_deg=phase_deg,
-            proc_fct=self._get_processed_image,
-            calib_um_per_v=self.calib_x_scale
-        )
+        # Update standalone overlay view if visible
+        if hasattr(self, "overlay_view") and self.overlay_view.isVisible():
+            self.overlay_view.set_scan_data(
+                scan=scan,
+                x_coords=x_coords,
+                y_coords=y_coords,
+                unit=unit,
+                phase_deg=phase_deg,
+                proc_fct=self._get_processed_image,
+                calib_um_per_v=self.calib_x_scale
+            )
 
     def _apply_contrast(self, image: np.ndarray):
         mode = self.combo_contrast.currentText()
@@ -1031,10 +1136,14 @@ class SLMMainWindow(QMainWindow):
             _, values_base, _ = processing.extract_line_profile(
                 self.current_base_data, (c0, r0), (c1, r1)
             )
+            top_name = self.combo_overlay_pr_chan.currentText() or "PR"
+            base_name = self.combo_overlay_pd_chan.currentText() or "PD"
             self.canvas_profile.set_dual_profile(
                 distances_phys, values, values_base, unit=unit,
-                title=f"Cut: PR on PD from ({c0:.0f}, {r0:.0f}) to ({c1:.0f}, {r1:.0f})",
-                calib_um_per_v=self.calib_x_scale
+                title=f"Cut: {top_name} & {base_name} from ({c0:.0f}, {r0:.0f}) to ({c1:.0f}, {r1:.0f})",
+                calib_um_per_v=self.calib_x_scale,
+                label_pr=top_name,
+                label_pd=base_name
             )
         else:
             self.canvas_profile.set_profile(
@@ -1046,7 +1155,10 @@ class SLMMainWindow(QMainWindow):
     def _update_roi_stats(self, c0: int, r0: int, c1: int, r1: int):
         if self.current_processed_data is None:
             return
-        stats = processing.calculate_roi_stats(self.current_processed_data, (c0, r0, c1, r1))
+        self._update_roi_stats_with_data(self.current_processed_data, (c0, r0, c1, r1))
+
+    def _update_roi_stats_with_data(self, data: np.ndarray, bbox: Tuple[int, int, int, int]):
+        stats = processing.calculate_roi_stats(data, bbox)
         
         self.table_roi.item(0, 1).setText(f"{stats['mean']:.4e}")
         self.table_roi.item(1, 1).setText(f"{stats['std']:.4e}")
@@ -1117,6 +1229,8 @@ class SLMMainWindow(QMainWindow):
             title=f"View 2: {key_r}"
         )
         self.dual_view.canvas_right.set_colormap(self.dual_view.combo_right_cmap.currentText())
+        self.dual_view.set_calibration(self.calib_x_scale)
+        self.dual_view.refresh_profile()
 
     # --- Navigation & Control Callbacks ---
 
@@ -1151,8 +1265,37 @@ class SLMMainWindow(QMainWindow):
             self.combo_steps.setCurrentIndex(step_idx)
 
     def _on_channel_changed(self, _):
+        txt = self.combo_channel.currentText()
+        if "Overlay" in txt:
+            if hasattr(self, "btn_sub_overlay") and not self.btn_sub_overlay.isChecked():
+                self.btn_sub_overlay.setChecked(True)
+                self.widget_overlay_inline.setVisible(True)
+                self.lbl_sub_single_info.setVisible(False)
+        else:
+            if hasattr(self, "btn_sub_single") and not self.btn_sub_single.isChecked():
+                self.btn_sub_single.setChecked(True)
+                self.widget_overlay_inline.setVisible(False)
+                self.lbl_sub_single_info.setVisible(True)
+            if hasattr(self, "lbl_sub_single_info"):
+                self.lbl_sub_single_info.setText(f"Active Channel: {txt}")
+
         self._update_display()
         self._update_series_trend()
+
+    def _on_submode_toggled(self, button):
+        is_overlay = (button == self.btn_sub_overlay)
+        self.widget_overlay_inline.setVisible(is_overlay)
+        self.lbl_sub_single_info.setVisible(not is_overlay)
+
+        if is_overlay:
+            self._update_display()
+        else:
+            txt = self.combo_channel.currentText()
+            if "Overlay" in txt:
+                if self.combo_channel.count() > 0:
+                    self.combo_channel.setCurrentIndex(0)
+            self._update_display()
+            self._update_series_trend()
 
     def _on_phase_spin_changed(self, val: float):
         self.slider_phase.blockSignals(True)
@@ -1208,6 +1351,8 @@ class SLMMainWindow(QMainWindow):
             self.calib_y_scale = cy
             self.spin_calib_x.blockSignals(False)
             self.spin_calib_y.blockSignals(False)
+            if hasattr(self, "dual_view"):
+                self.dual_view.set_calibration(self.calib_x_scale)
             if self.calib_unit == "um":
                 self._update_display()
 
@@ -1217,31 +1362,47 @@ class SLMMainWindow(QMainWindow):
         self.combo_objective.blockSignals(True)
         self.combo_objective.setCurrentText("Custom")
         self.combo_objective.blockSignals(False)
+        if hasattr(self, "dual_view"):
+            self.dual_view.set_calibration(self.calib_x_scale)
         if self.calib_unit == "um":
             self._update_display()
 
     def _on_invert_y_toggled(self, invert: bool):
         self.canvas_2d.set_invert_y(invert)
+        if hasattr(self, "dual_view"):
+            self.dual_view.set_invert_y(invert)
 
     def _on_tool_mode_changed(self, button):
         mode_idx = self.btn_group_tools.id(button)
         modes = ["crosshair", "line", "roi", "navigate"]
         self.active_tool_mode = modes[mode_idx]
         self.canvas_2d.set_mode(self.active_tool_mode)
+        if hasattr(self, "dual_view"):
+            self.dual_view.set_mode(self.active_tool_mode)
 
     def _on_quick_hcut(self):
-        if self.canvas_2d.image_data is not None:
-            rows = self.canvas_2d.image_data.shape[0]
-            self.rb_tool_line.setChecked(True)
-            self.canvas_2d.set_mode("line")
-            self.canvas_2d.set_horizontal_cut(rows // 2)
+        self.rb_tool_line.setChecked(True)
+        self._on_tool_mode_changed(self.rb_tool_line)
+        if self.tabs.currentIndex() == 1:
+            if self.dual_view.canvas_left.image_data is not None:
+                rows = self.dual_view.canvas_left.image_data.shape[0]
+                self.dual_view.set_horizontal_cut(rows // 2)
+        else:
+            if self.canvas_2d.image_data is not None:
+                rows = self.canvas_2d.image_data.shape[0]
+                self.canvas_2d.set_horizontal_cut(rows // 2)
 
     def _on_quick_vcut(self):
-        if self.canvas_2d.image_data is not None:
-            cols = self.canvas_2d.image_data.shape[1]
-            self.rb_tool_line.setChecked(True)
-            self.canvas_2d.set_mode("line")
-            self.canvas_2d.set_vertical_cut(cols // 2)
+        self.rb_tool_line.setChecked(True)
+        self._on_tool_mode_changed(self.rb_tool_line)
+        if self.tabs.currentIndex() == 1:
+            if self.dual_view.canvas_left.image_data is not None:
+                cols = self.dual_view.canvas_left.image_data.shape[1]
+                self.dual_view.set_vertical_cut(cols // 2)
+        else:
+            if self.canvas_2d.image_data is not None:
+                cols = self.canvas_2d.image_data.shape[1]
+                self.canvas_2d.set_vertical_cut(cols // 2)
 
     def _on_overlay_cbar_alpha_toggled(self, checked: bool):
         if checked and self.slider_overlay_alpha.value() != 100:
@@ -1335,17 +1496,33 @@ class SLMMainWindow(QMainWindow):
 
     def _on_line_cut_changed(self, c0: float, r0: float, c1: float, r1: float):
         self._update_line_profile(c0, r0, c1, r1)
+        if hasattr(self, "dual_view"):
+            self.dual_view.line_points = (c0, r0, c1, r1)
+            self.dual_view.canvas_left.set_line_cut(c0, r0, c1, r1, emit_signal=False)
+            self.dual_view.canvas_right.set_line_cut(c0, r0, c1, r1, emit_signal=False)
+            self.dual_view.refresh_profile()
 
     def _on_roi_changed(self, c0: int, r0: int, c1: int, r1: int):
         self._update_roi_stats(c0, r0, c1, r1)
         self._update_series_trend()
+        if hasattr(self, "dual_view"):
+            self.dual_view.roi_box = (c0, r0, c1, r1)
+            self.dual_view.canvas_left.set_roi(c0, r0, c1, r1, emit_signal=False)
+            self.dual_view.canvas_right.set_roi(c0, r0, c1, r1, emit_signal=False)
+
+    def _on_dual_line_cut_changed(self, c0: float, r0: float, c1: float, r1: float):
+        self.canvas_2d.set_line_cut(c0, r0, c1, r1, emit_signal=False)
+
+    def _on_dual_roi_changed(self, c0: int, r0: int, c1: int, r1: int):
+        self.canvas_2d.set_roi(c0, r0, c1, r1, emit_signal=False)
+        if self.dual_view.canvas_left.image_data is not None:
+            self._update_roi_stats_with_data(self.dual_view.canvas_left.image_data, (c0, r0, c1, r1))
+            self._update_series_trend()
 
     def _on_tab_changed(self, index: int):
         if index == 1:
             self._update_dual_view()
         elif index == 2:
-            self.overlay_view.refresh_display()
-        elif index == 3:
             self._update_series_trend()
 
     def _on_reset_filters(self):

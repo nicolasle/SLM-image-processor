@@ -201,6 +201,8 @@ class SLMOverlayView(QWidget):
     def refresh_display(self):
         if self.current_scan is None or self.x_coords is None or self.y_coords is None:
             return
+        if not self.isVisible() and self.canvas_2d.width() <= 0:
+            return
 
         over_name = self.combo_over_channel.currentText()
         base_name = self.combo_base_channel.currentText()
