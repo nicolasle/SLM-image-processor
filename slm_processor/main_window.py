@@ -395,27 +395,37 @@ class SLMMainWindow(QMainWindow):
         row_alpha.addWidget(self.spin_overlay_alpha)
         overlay_grid.addLayout(row_alpha, 0, 1)
 
-        overlay_grid.addWidget(QLabel("Top (Overlay) Layer:"), 1, 0)
+        self.chk_overlay_cbar_alpha = QCheckBox("Cbar Min α=0 → Max α=1")
+        self.chk_overlay_cbar_alpha.setStyleSheet("color: #00e5ff; font-weight: bold; font-size: 10px;")
+        self.chk_overlay_cbar_alpha.setToolTip(
+            "Sets overlay opacity based on colorbar values: min value is completely transparent (alpha=0) "
+            "and max value is opaque (alpha=1). Shows only meaningful signal on top of base layer."
+        )
+        self.chk_overlay_cbar_alpha.toggled.connect(self._on_overlay_cbar_alpha_toggled)
+        self.chk_overlay_gradient = self.chk_overlay_cbar_alpha
+        overlay_grid.addWidget(self.chk_overlay_cbar_alpha, 1, 0, 1, 2)
+
+        overlay_grid.addWidget(QLabel("Top (Overlay) Layer:"), 2, 0)
         self.combo_overlay_pr_chan = QComboBox()
         self.combo_overlay_pr_chan.currentIndexChanged.connect(self._on_overlay_param_changed)
-        overlay_grid.addWidget(self.combo_overlay_pr_chan, 1, 1)
+        overlay_grid.addWidget(self.combo_overlay_pr_chan, 2, 1)
 
-        overlay_grid.addWidget(QLabel("Top Colormap:"), 2, 0)
+        overlay_grid.addWidget(QLabel("Top Colormap:"), 3, 0)
         self.combo_overlay_pr_cmap = QComboBox()
         self.combo_overlay_pr_cmap.addItems(["inferno", "turbo", "plasma", "viridis", "coolwarm", "hot", "magma"])
         self.combo_overlay_pr_cmap.currentIndexChanged.connect(self._on_overlay_param_changed)
-        overlay_grid.addWidget(self.combo_overlay_pr_cmap, 2, 1)
+        overlay_grid.addWidget(self.combo_overlay_pr_cmap, 3, 1)
 
-        overlay_grid.addWidget(QLabel("Bottom (Base) Layer:"), 3, 0)
+        overlay_grid.addWidget(QLabel("Bottom (Base) Layer:"), 4, 0)
         self.combo_overlay_pd_chan = QComboBox()
         self.combo_overlay_pd_chan.currentIndexChanged.connect(self._on_overlay_param_changed)
-        overlay_grid.addWidget(self.combo_overlay_pd_chan, 3, 1)
+        overlay_grid.addWidget(self.combo_overlay_pd_chan, 4, 1)
 
-        overlay_grid.addWidget(QLabel("Bottom Colormap:"), 4, 0)
+        overlay_grid.addWidget(QLabel("Bottom Colormap:"), 5, 0)
         self.combo_overlay_pd_cmap = QComboBox()
         self.combo_overlay_pd_cmap.addItems(["gray", "bone", "cividis", "Greys_r", "viridis", "coolwarm"])
         self.combo_overlay_pd_cmap.currentIndexChanged.connect(self._on_overlay_param_changed)
-        overlay_grid.addWidget(self.combo_overlay_pd_cmap, 4, 1)
+        overlay_grid.addWidget(self.combo_overlay_pd_cmap, 5, 1)
 
         sidebar_layout.addWidget(group_overlay)
 
@@ -624,6 +634,7 @@ class SLMMainWindow(QMainWindow):
         # Tab 3: Dedicated PR on PD Overlay View
         self.overlay_view = SLMOverlayView(self)
         self.overlay_view.alpha_changed.connect(self._sync_alpha_from_view)
+        self.overlay_view.gradient_changed.connect(self._sync_gradient_from_view)
         self.tabs.addTab(self.overlay_view, "PR on PD Overlay")
 
         # Tab 4: Series Analysis
@@ -916,7 +927,12 @@ class SLMMainWindow(QMainWindow):
             base_cmap = self.combo_overlay_pd_cmap.currentText()
             over_cmap = self.combo_overlay_pr_cmap.currentText()
 
-            title = f"Scan: {scan.step_name} | {top_name} on {base_name} (α={alpha*100:.0f}%)"
+            is_cbar = self.chk_overlay_cbar_alpha.isChecked()
+            if is_cbar:
+                title = f"Scan: {scan.step_name} | {top_name} on {base_name} (Cbar Min α=0 → Max α={alpha*100:.0f}%)"
+            else:
+                title = f"Scan: {scan.step_name} | {top_name} on {base_name} (α={alpha*100:.0f}%)"
+
             self.canvas_2d.set_overlay_data(
                 base_image=base_img,
                 overlay_image=over_img,
@@ -926,7 +942,8 @@ class SLMMainWindow(QMainWindow):
                 x_coords=x_coords,
                 y_coords=y_coords,
                 unit=unit,
-                title=title
+                title=title,
+                cbar_alpha=is_cbar
             )
             self._apply_contrast(over_img)
         else:
@@ -1212,6 +1229,28 @@ class SLMMainWindow(QMainWindow):
             self.canvas_2d.set_mode("line")
             self.canvas_2d.set_vertical_cut(cols // 2)
 
+    def _on_overlay_cbar_alpha_toggled(self, checked: bool):
+        if checked and self.slider_overlay_alpha.value() != 100:
+            self.slider_overlay_alpha.setValue(100)
+        self.canvas_2d.set_overlay_cbar_alpha(checked)
+        self.overlay_view.chk_cbar_alpha.blockSignals(True)
+        self.overlay_view.chk_cbar_alpha.setChecked(checked)
+        self.overlay_view.chk_cbar_alpha.blockSignals(False)
+        self.overlay_view.canvas_2d.set_overlay_cbar_alpha(checked)
+        if self._get_current_channel_key() == "OVERLAY":
+            self._update_display()
+
+    # Backwards-compatible alias
+    _on_overlay_gradient_toggled = _on_overlay_cbar_alpha_toggled
+
+    def _sync_gradient_from_view(self, checked: bool):
+        self.chk_overlay_cbar_alpha.blockSignals(True)
+        self.chk_overlay_cbar_alpha.setChecked(checked)
+        self.chk_overlay_cbar_alpha.blockSignals(False)
+        self.canvas_2d.set_overlay_cbar_alpha(checked)
+        if self._get_current_channel_key() == "OVERLAY":
+            self._update_display()
+
     def _on_sidebar_alpha_slider_changed(self, val: int):
         self.spin_overlay_alpha.blockSignals(True)
         self.spin_overlay_alpha.setValue(val)
@@ -1248,10 +1287,26 @@ class SLMMainWindow(QMainWindow):
             top_name = self.combo_overlay_pr_chan.currentText()
             base_name = self.combo_overlay_pd_chan.currentText()
             val_base = float(self.current_base_data[row, col])
-            alpha_pct = self.slider_overlay_alpha.value()
+            if (
+                self.chk_overlay_cbar_alpha.isChecked()
+                and hasattr(self, "current_processed_data")
+                and self.current_processed_data is not None
+            ):
+                if self.canvas_2d.clim is not None:
+                    v0, v1 = self.canvas_2d.clim
+                else:
+                    v0 = float(np.percentile(self.current_processed_data, 1.0))
+                    v1 = float(np.percentile(self.current_processed_data, 99.0))
+                span = float(v1 - v0)
+                norm = float(np.clip((val - v0) / span, 0.0, 1.0)) if abs(span) > 1e-15 else 0.0
+                local_pct = norm * self.slider_overlay_alpha.value()
+                alpha_str = f"α={local_pct:.0f}% (Cbar Min 0% → Max {self.slider_overlay_alpha.value()}%)"
+            else:
+                alpha_str = f"α={self.slider_overlay_alpha.value()}%"
+
             self.lbl_cursor_val.setText(
                 f"Cursor: ({x:.3f} {self.calib_unit}, {y:.3f} {self.calib_unit}) [c={col}, r={row}] "
-                f"{top_name}: {val:.4e} | {base_name}: {val_base:.4e} (α={alpha_pct}%)"
+                f"{top_name}: {val:.4e} | {base_name}: {val_base:.4e} ({alpha_str})"
             )
             self.statusBar.showMessage(
                 f"X: {x:.4f} {self.calib_unit} | Y: {y:.4f} {self.calib_unit} | {top_name}: {val:.4e} | {base_name}: {val_base:.4e}"

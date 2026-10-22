@@ -36,6 +36,7 @@ class SLMImageCanvas(QWidget):
         self.overlay_data: Optional[np.ndarray] = None
         self.is_overlay_mode: bool = False
         self.overlay_alpha: float = 0.6
+        self.overlay_cbar_alpha: bool = False
         self.base_cmap: str = "gray"
         self.overlay_cmap: str = "inferno"
 
@@ -166,13 +167,15 @@ class SLMImageCanvas(QWidget):
         y_coords: Optional[np.ndarray] = None,
         unit: str = "V",
         title: Optional[str] = None,
-        clim_overlay: Optional[Tuple[float, float]] = None
+        clim_overlay: Optional[Tuple[float, float]] = None,
+        cbar_alpha: bool = False
     ):
         """Sets two-layer overlay data: base_image (PD) and overlay_image (PR)."""
         self.is_overlay_mode = True
         self.image_data = base_image
         self.overlay_data = overlay_image
         self.overlay_alpha = float(np.clip(alpha, 0.0, 1.0))
+        self.overlay_cbar_alpha = bool(cbar_alpha)
         self.base_cmap = base_cmap
         self.overlay_cmap = overlay_cmap
         self.clim_overlay = clim_overlay
@@ -203,12 +206,47 @@ class SLMImageCanvas(QWidget):
 
         self.redraw_image()
 
+    def _compute_effective_alpha(self):
+        """Returns either a scalar alpha or a 2D alpha map where cbar min is alpha=0 and cbar max is alpha=1."""
+        if self.overlay_cbar_alpha and self.overlay_data is not None:
+            if self.clim_overlay is not None:
+                v0, v1 = self.clim_overlay
+            else:
+                v0 = float(np.percentile(self.overlay_data, 1.0))
+                v1 = float(np.percentile(self.overlay_data, 99.0))
+
+            span = float(v1 - v0)
+            if abs(span) > 1e-15:
+                norm = np.clip((self.overlay_data - v0) / span, 0.0, 1.0).astype(np.float32)
+            else:
+                norm = np.zeros_like(self.overlay_data, dtype=np.float32)
+
+            top_alpha = max(1e-4, self.overlay_alpha)
+            return norm * top_alpha
+
+        return self.overlay_alpha
+
     def set_overlay_alpha(self, alpha: float):
         """Dynamically adjusts the overlay transparency without full redraw."""
         self.overlay_alpha = float(np.clip(alpha, 0.0, 1.0))
         if self.overlay_artist is not None:
-            self.overlay_artist.set_alpha(self.overlay_alpha)
+            eff_alpha = self._compute_effective_alpha()
+            # Reset _alpha to avoid Matplotlib ValueError when changing from array to scalar
+            self.overlay_artist._alpha = None
+            self.overlay_artist.set_alpha(eff_alpha)
             self.canvas.draw_idle()
+
+    def set_overlay_cbar_alpha(self, enabled: bool):
+        """Toggles colorbar-based alpha mapping: min value alpha=0 to max value alpha=1."""
+        self.overlay_cbar_alpha = bool(enabled)
+        if self.overlay_artist is not None:
+            eff_alpha = self._compute_effective_alpha()
+            self.overlay_artist._alpha = None
+            self.overlay_artist.set_alpha(eff_alpha)
+            self.canvas.draw_idle()
+
+    # Backwards-compatible alias
+    set_overlay_alpha_gradient = set_overlay_cbar_alpha
 
     def set_clim(self, vmin: Optional[float], vmax: Optional[float]):
         """Sets display color limits for active image."""
@@ -355,12 +393,14 @@ class SLMImageCanvas(QWidget):
                 v_o0 = float(np.percentile(self.overlay_data, 1.0))
                 v_o1 = float(np.percentile(self.overlay_data, 99.0))
 
+            eff_alpha = self._compute_effective_alpha()
+
             self.overlay_artist = self.ax.imshow(
                 self.overlay_data,
                 extent=extent,
                 origin=self.origin,
                 cmap=self.overlay_cmap,
-                alpha=self.overlay_alpha,
+                alpha=eff_alpha,
                 vmin=v_o0,
                 vmax=v_o1,
                 interpolation="nearest"

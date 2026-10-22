@@ -34,6 +34,7 @@ The application is tailored for lock-in SLM acquisitions where each scan step co
 - **Arbitrary Layer Selection**: Choose **ANY** available channel as the Bottom (Base) layer and **ANY** channel as the Top (Overlay) layer.
 - **Independent Colormaps & Contrast**: Set independent colormaps and contrast limits for each layer (e.g. grayscale for baseline, inferno/turbo for active signal).
 - **Dynamic Alpha Slider**: Instant real-time slider and spinbox ($0\%$ to $100\%$) to smoothly blend the top layer onto the base layer.
+- **Cbar Min α=0 → Max α=1 (Transparent Baseline)**: Checkbox that dynamically maps overlay opacity to signal intensity. Background values at or below the colorbar minimum are completely transparent ($\alpha=0$), clearly showing the photodiode reflection / crystal structure underneath, while peak signal values are opaque ($\alpha=1$) to highlight only meaningful response.
 - **Dedicated Overlay Tab**: Full-screen overlay workspace with quick controls and synchronized dual line cuts.
 - **Dual 1D Line Profile**: In overlay mode, the line profile canvas plots both the overlay signal (left axis) and the base baseline (right twin axis) along the exact same spatial cut line!
 

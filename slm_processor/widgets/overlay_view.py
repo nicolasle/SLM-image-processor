@@ -4,7 +4,7 @@ import numpy as np
 from typing import Optional, Tuple, List
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QSlider,
-    QSpinBox, QSplitter, QFrame
+    QSpinBox, QSplitter, QFrame, QCheckBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from slm_processor.widgets.image_canvas import SLMImageCanvas
@@ -16,6 +16,7 @@ class SLMOverlayView(QWidget):
     """Dedicated workspace for overlapping ANY two channels with interactive alpha."""
 
     alpha_changed = pyqtSignal(float)
+    gradient_changed = pyqtSignal(bool)
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -79,6 +80,20 @@ class SLMOverlayView(QWidget):
         header_layout.addWidget(lbl_alpha)
         header_layout.addWidget(self.slider_alpha)
         header_layout.addWidget(self.spin_alpha)
+
+        # Cbar Min alpha=0 to max alpha=1 checkbox
+        self.chk_cbar_alpha = QCheckBox("Cbar Min α=0 → Max α=1")
+        self.chk_cbar_alpha.setStyleSheet(
+            "font-weight: bold; color: #00e5ff; font-size: 11px;"
+        )
+        self.chk_cbar_alpha.setToolTip(
+            "Sets overlay opacity based on colorbar values: min value is completely transparent (alpha=0) "
+            "and max value is opaque (alpha=1). Shows only meaningful signal on top of base layer."
+        )
+        self.chk_cbar_alpha.toggled.connect(self._on_cbar_alpha_toggled)
+        self.chk_alpha_gradient = self.chk_cbar_alpha  # Backwards-compatible alias
+        header_layout.addWidget(self.chk_cbar_alpha)
+
         header_layout.addSpacing(10)
         header_layout.addWidget(lbl_over)
         header_layout.addWidget(self.combo_over_channel)
@@ -203,7 +218,12 @@ class SLMOverlayView(QWidget):
         self.current_over_img = over_img
         self.current_base_img = base_img
 
-        title = f"Scan: {self.current_scan.step_name} | {over_name} on {base_name} (α={self.alpha_val*100:.0f}%)"
+        is_cbar_alpha = self.chk_cbar_alpha.isChecked()
+        if is_cbar_alpha:
+            title = f"Scan: {self.current_scan.step_name} | {over_name} on {base_name} (Cbar Min α=0 → Max α={self.alpha_val*100:.0f}%)"
+        else:
+            title = f"Scan: {self.current_scan.step_name} | {over_name} on {base_name} (α={self.alpha_val*100:.0f}%)"
+
         self.canvas_2d.set_overlay_data(
             base_image=base_img,
             overlay_image=over_img,
@@ -213,11 +233,22 @@ class SLMOverlayView(QWidget):
             x_coords=self.x_coords,
             y_coords=self.y_coords,
             unit=self.unit_label,
-            title=title
+            title=title,
+            cbar_alpha=is_cbar_alpha
         )
 
         if self.canvas_2d.line_points:
             self._update_dual_line_cut(*self.canvas_2d.line_points)
+
+    def _on_cbar_alpha_toggled(self, checked: bool):
+        if checked and self.slider_alpha.value() != 100:
+            self.slider_alpha.setValue(100)
+        self.canvas_2d.set_overlay_cbar_alpha(checked)
+        self.refresh_display()
+        self.gradient_changed.emit(checked)
+
+    # Alias
+    _on_alpha_gradient_toggled = _on_cbar_alpha_toggled
 
     def _on_slider_alpha_changed(self, val: int):
         self.alpha_val = val / 100.0
@@ -269,7 +300,21 @@ class SLMOverlayView(QWidget):
     def _on_overlay_hovered(self, col: int, row: int, x: float, y: float, val_over: float, val_base: float):
         over_name = self.combo_over_channel.currentText()
         base_name = self.combo_base_channel.currentText()
+
+        if self.chk_cbar_alpha.isChecked() and hasattr(self, "current_over_img") and self.current_over_img is not None:
+            if self.canvas_2d.clim_overlay is not None:
+                v0, v1 = self.canvas_2d.clim_overlay
+            else:
+                v0 = float(np.percentile(self.current_over_img, 1.0))
+                v1 = float(np.percentile(self.current_over_img, 99.0))
+            span = float(v1 - v0)
+            norm = float(np.clip((val_over - v0) / span, 0.0, 1.0)) if abs(span) > 1e-15 else 0.0
+            local_pct = norm * (self.alpha_val * 100.0)
+            alpha_str = f"Alpha: {local_pct:.0f}% (Cbar Min 0% → Max {self.alpha_val*100:.0f}%)"
+        else:
+            alpha_str = f"Alpha: {self.alpha_val*100:.0f}%"
+
         self.lbl_readout.setText(
             f"Cursor: ({x:.3f} {self.unit_label}, {y:.3f} {self.unit_label}) [col={col}, row={row}]  |  "
-            f"{over_name}: {val_over:.4e}  |  {base_name}: {val_base:.4e}  |  Alpha: {self.alpha_val*100:.0f}%"
+            f"{over_name}: {val_over:.4e}  |  {base_name}: {val_base:.4e}  |  {alpha_str}"
         )
