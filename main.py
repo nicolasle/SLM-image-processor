@@ -9,7 +9,7 @@ import os
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon
-from slm_processor.main_window import SLMMainWindow
+from slm_processor.main_window import SLMMainWindow, NoScrollComboFilter
 
 
 def main():
@@ -21,6 +21,11 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName("SLM Image Processor")
+
+    # Install application-wide event filter to disable mouse-wheel scrolling on dropdown lists
+    combo_filter = NoScrollComboFilter(app)
+    app.installEventFilter(combo_filter)
+    app._no_scroll_combo_filter_installed = True
 
     icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_icon.ico")
     if os.path.exists(icon_path):

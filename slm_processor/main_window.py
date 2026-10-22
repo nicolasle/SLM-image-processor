@@ -9,9 +9,10 @@ from PyQt6.QtWidgets import (
     QTabWidget, QSplitter, QGroupBox, QLabel, QComboBox, QSlider,
     QDoubleSpinBox, QSpinBox, QCheckBox, QPushButton, QRadioButton,
     QButtonGroup, QFileDialog, QMessageBox, QTableWidget, QTableWidgetItem,
-    QHeaderView, QStatusBar, QToolBar, QScrollArea, QFrame
+    QHeaderView, QStatusBar, QToolBar, QScrollArea, QFrame, QAbstractScrollArea,
+    QApplication
 )
-from PyQt6.QtCore import Qt, pyqtSlot
+from PyQt6.QtCore import Qt, pyqtSlot, QObject, QEvent
 from PyQt6.QtGui import QAction, QIcon, QFont
 
 from slm_processor.data_model import SLMDataset, SLMScan, OBJECTIVE_CALIBRATION
@@ -155,6 +156,26 @@ QSplitter::handle:vertical:hover {
 """
 
 
+class NoScrollComboFilter(QObject):
+    """Event filter that prevents mouse wheel scrolling from changing QComboBox values
+
+    when the popup list is closed, while smoothly forwarding the scroll event
+    to any parent QAbstractScrollArea (such as the sidebar scroll area).
+    """
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.Wheel and isinstance(obj, QComboBox):
+            event.ignore()
+            parent = obj.parentWidget()
+            while parent:
+                if isinstance(parent, QAbstractScrollArea) and parent.viewport():
+                    QApplication.sendEvent(parent.viewport(), event)
+                    break
+                parent = parent.parentWidget()
+            return True
+        return super().eventFilter(obj, event)
+
+
 class SLMMainWindow(QMainWindow):
     """Main application window for Scanning Laser Microscopy."""
 
@@ -163,6 +184,13 @@ class SLMMainWindow(QMainWindow):
         self.setWindowTitle("Scanning Laser Microscopy Image Processor")
         self.resize(1600, 900)
         self.setStyleSheet(DARK_STYLE)
+
+        # Install application-wide event filter to disable mouse-wheel scrolling on dropdown lists
+        app = QApplication.instance()
+        if app is not None and not getattr(app, "_no_scroll_combo_filter_installed", False):
+            self._no_scroll_filter = NoScrollComboFilter(app)
+            app.installEventFilter(self._no_scroll_filter)
+            app._no_scroll_combo_filter_installed = True
 
         icon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app_icon.ico")
         if os.path.exists(icon_path):
