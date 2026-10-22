@@ -204,6 +204,7 @@ class SLMMainWindow(QMainWindow):
         self.current_scan_idx: int = 0
         self.current_raw_channel: str = "PR_R"
         self.current_processed_data: Optional[np.ndarray] = None
+        self.channel_manager_dlg: Optional[SLMChannelManagerDialog] = None
 
         # Coordinates calibration (Default 50x objective from LSM.py)
         self.calib_x_scale = 62.166693  # um per Volt
@@ -923,6 +924,8 @@ class SLMMainWindow(QMainWindow):
 
             self._populate_dataset_ui()
             self._save_recent_dataset(dir_path)
+            if hasattr(self, "channel_manager_dlg") and self.channel_manager_dlg and self.channel_manager_dlg.isVisible():
+                self.channel_manager_dlg.set_active_dataset(self.dataset)
             self.statusBar.showMessage(f"Loaded {len(self.dataset)} scans from {dir_path}", 4000)
 
         except Exception as e:
@@ -1013,9 +1016,53 @@ class SLMMainWindow(QMainWindow):
             name = os.path.basename(self.dataset.root_dir) if self.dataset.root_dir else "Active Dataset"
             all_ds[f"{name} ({len(self.dataset)} scans)"] = self.dataset
 
-        dlg = SLMChannelManagerDialog(self.dataset, self, all_datasets=all_ds)
-        dlg.channels_updated.connect(self._on_channels_updated)
-        dlg.exec()
+        if self.channel_manager_dlg is None or not self.channel_manager_dlg.isVisible():
+            self.channel_manager_dlg = SLMChannelManagerDialog(self.dataset, self, all_datasets=all_ds)
+            self.channel_manager_dlg.channel_selected.connect(self._on_channel_manager_select_channel)
+            self.channel_manager_dlg.send_to_dual.connect(self._on_channel_manager_send_dual)
+            self.channel_manager_dlg.send_to_overlay.connect(self._on_channel_manager_send_overlay)
+            self.channel_manager_dlg.channels_updated.connect(self._on_channels_updated)
+        else:
+            self.channel_manager_dlg.set_active_dataset(self.dataset, all_datasets=all_ds)
+
+        self.channel_manager_dlg.show()
+        self.channel_manager_dlg.raise_()
+        self.channel_manager_dlg.activateWindow()
+
+    def _on_channel_manager_select_channel(self, chan_name: str):
+        self.tabs.setCurrentIndex(0)
+        if hasattr(self, "btn_sub_single") and hasattr(self, "btn_sub_overlay"):
+            self.btn_sub_single.setChecked(True)
+            self._on_submode_toggled(self.btn_sub_single)
+        chans = [self.combo_channel.itemText(i) for i in range(self.combo_channel.count())]
+        if chan_name in chans:
+            self.combo_channel.setCurrentText(chan_name)
+        self._update_display()
+        self._update_quick_buttons_state()
+        self.statusBar.showMessage(f"Channel '{chan_name}' loaded in 2D View", 3000)
+
+    def _on_channel_manager_send_dual(self, chan_name: str, target: str):
+        self.tabs.setCurrentIndex(1)
+        if target == "left":
+            self.dual_view.combo_left.setCurrentText(chan_name)
+        else:
+            self.dual_view.combo_right.setCurrentText(chan_name)
+        self._update_dual_view()
+        self._update_quick_buttons_state()
+        self.statusBar.showMessage(f"Channel '{chan_name}' sent to Dual View ({target})", 3000)
+
+    def _on_channel_manager_send_overlay(self, chan_name: str, target: str):
+        self.tabs.setCurrentIndex(0)
+        if hasattr(self, "btn_sub_overlay"):
+            self.btn_sub_overlay.setChecked(True)
+            self._on_submode_toggled(self.btn_sub_overlay)
+        if target == "top":
+            self.combo_overlay_pr_chan.setCurrentText(chan_name)
+        else:
+            self.combo_overlay_pd_chan.setCurrentText(chan_name)
+        self._update_display()
+        self._update_quick_buttons_state()
+        self.statusBar.showMessage(f"Channel '{chan_name}' set as Overlay {target}", 3000)
 
     def _on_channels_updated(self):
         self._refresh_channel_dropdowns()
@@ -1027,7 +1074,9 @@ class SLMMainWindow(QMainWindow):
             return
 
         scan = self.dataset[self.current_scan_idx]
-        chans = scan.available_channels
+        raw_chans = scan.available_channels
+        favs = getattr(self.dataset, "favorite_channels", set())
+        chans = sorted(raw_chans, key=lambda c: (0 if c in favs else 1, c))
 
         # 1. Main channel selector
         curr_main = self.combo_channel.currentText()

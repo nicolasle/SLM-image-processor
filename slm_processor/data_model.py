@@ -77,11 +77,12 @@ OBJECTIVE_CALIBRATION: Dict[str, Tuple[float, float]] = {
 class DerivedChannelDef:
     """Definition of a user-defined or auto-generated derived channel."""
     name: str
-    kind: str  # "lockin_r", "lockin_theta", "lockin_x_rot", "lockin_y_rot", "ratio", "diff", "linear"
-    source_a: str
+    kind: str  # "lockin_r", "lockin_theta", "lockin_x_rot", "lockin_y_rot", "ratio", "diff", "linear", "expression"
+    source_a: str = ""
     source_b: Optional[str] = None
     scale_a: float = 1.0
     scale_b: float = 1.0
+    expression: Optional[str] = None
 
 
 class SLMScan:
@@ -325,6 +326,70 @@ class SLMScan:
             name=name, kind="diff", source_a=chan_a, source_b=chan_b
         )
 
+    def add_expression_channel(self, name: str, expression: str):
+        """Adds a derived channel computed from an arbitrary NumPy expression."""
+        self.derived_defs[name] = DerivedChannelDef(
+            name=name, kind="expression", source_a="", expression=expression
+        )
+
+    def evaluate_expression(self, expr: str, phase_deg: float = 0.0) -> np.ndarray:
+        """Safely evaluates a NumPy mathematical expression using available channels."""
+        safe_globals = {
+            "__builtins__": {},
+            "np": np,
+            "sin": np.sin,
+            "cos": np.cos,
+            "tan": np.tan,
+            "arcsin": np.arcsin,
+            "arccos": np.arccos,
+            "arctan": np.arctan,
+            "arctan2": np.arctan2,
+            "deg2rad": np.deg2rad,
+            "rad2deg": np.rad2deg,
+            "sqrt": np.sqrt,
+            "abs": np.abs,
+            "log": np.log,
+            "log10": np.log10,
+            "log2": np.log2,
+            "exp": np.exp,
+            "maximum": np.maximum,
+            "minimum": np.minimum,
+            "clip": np.clip,
+            "mean": np.mean,
+            "median": np.median,
+            "std": np.std,
+            "pi": np.pi,
+            "e": np.e,
+        }
+
+        local_vars = {}
+        for ch in self.available_channels:
+            safe_name = re.sub(r'\W+', '_', ch)
+            if ch in expr or safe_name in expr:
+                try:
+                    arr = self.get_channel(ch, phase_deg=phase_deg)
+                    local_vars[ch] = arr
+                    if safe_name != ch:
+                        local_vars[safe_name] = arr
+                except Exception:
+                    pass
+
+        if "PR" in expr and "PR" not in local_vars:
+            local_vars["PR"] = self.get_channel("PR_R", phase_deg=phase_deg)
+        if "PD" in expr and "PD" not in local_vars:
+            local_vars["PD"] = self.get_channel("PD_R", phase_deg=phase_deg)
+
+        result = eval(expr, safe_globals, local_vars)
+        if isinstance(result, (int, float)):
+            rows, cols = self.shape
+            result = np.full((rows, cols), result, dtype=np.float32)
+        elif isinstance(result, np.ndarray):
+            result = result.astype(np.float32)
+        else:
+            raise ValueError(f"Expression returned unsupported type: {type(result)}")
+
+        return np.nan_to_num(result, nan=0.0, posinf=0.0, neginf=0.0)
+
     def remove_derived_channel(self, name: str):
         """Removes a user-defined derived channel."""
         self.derived_defs.pop(name, None)
@@ -422,6 +487,8 @@ class SLMScan:
                 return arr_a - arr_b
             elif d.kind == "linear":
                 return d.scale_a * arr_a + (d.scale_b * arr_b if arr_b is not None else 0.0)
+            elif d.kind == "expression" and d.expression:
+                return self.evaluate_expression(d.expression, phase_deg)
 
         # Fallbacks for backwards compatibility
         ch = channel_name.upper()
@@ -480,6 +547,7 @@ class SLMDataset:
         self.is_harmonic_series: bool = False
         self.detected_lia_freq: Optional[float] = None
         self.series_variable_name: str = "Step"  # "Harmonic", "Time (ms)", "Step", etc.
+        self.favorite_channels: set[str] = set()
         self._load_dataset()
 
     def _load_dataset(self):
@@ -850,6 +918,18 @@ class SLMDataset:
     def add_diff_to_all(self, name: str, chan_a: str, chan_b: str):
         for scan in self.scans:
             scan.add_diff_channel(name, chan_a, chan_b)
+
+    def add_expression_to_all(self, name: str, expression: str):
+        for scan in self.scans:
+            scan.add_expression_channel(name, expression)
+
+    def toggle_favorite_channel(self, channel_name: str) -> bool:
+        if channel_name in self.favorite_channels:
+            self.favorite_channels.remove(channel_name)
+            return False
+        else:
+            self.favorite_channels.add(channel_name)
+            return True
 
     def remove_derived_from_all(self, name: str):
         for scan in self.scans:
