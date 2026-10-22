@@ -4,6 +4,18 @@ A Python desktop application built with **PyQt6** and **Matplotlib** for loading
 
 ---
 
+> [!WARNING]
+> ### AI-Generated Code Notice & Associated Risks
+> **Notice**: This entire application, including architecture, mathematical processing pipelines, algorithms, and user interface, was **100% generated using Artificial Intelligence (AI) coding agents**.
+>
+> **Associated Risks & Important Considerations:**
+> 1. **Scientific & Numerical Verification Required**: While core numerical routines (such as least-squares polynomial surface leveling, line-by-line background subtraction, Hermitian inverse Fourier reconstitution, knife-edge error function fitting, and lock-in phase rotation) follow established physical and analytical principles, all computational outputs should be independently validated and cross-checked against experimental ground truth before publication or critical scientific decision-making.
+> 2. **Hardware & Format Edge Cases**: Microscope setups, acquisition hardware, and lock-in amplifiers vary in file naming conventions, mirror voltage calibration factors, channel ordering, and sign conventions. Unconventional headers, missing log coordinates, or noisy background data may trigger edge-case behaviors or incorrect coordinate interpretations.
+> 3. **Non-Standard Evaluation Environments**: Features such as the free-form NumPy formula evaluator execute mathematical expressions dynamically on active scan data. Ensure user-supplied expressions are mathematically well-conditioned (e.g. guard against division by zero).
+> 4. **No Warranty & Data Integrity**: This software is provided *"as is"*, without warranty of any kind, express or implied. Users should always maintain separate, secure backups of original raw acquisition files before performing batch operations, leveling, or exports.
+
+---
+
 ## Data Structure & Format
 
 The application is tailored for lock-in SLM acquisitions where each scan step consists of:
@@ -18,19 +30,20 @@ The application is tailored for lock-in SLM acquisitions where each scan step co
 
 ## Key Features
 
-### 1. Flexible Multi-Channel Architecture
+### 1. Flexible Multi-Channel Architecture & Signal Workbench
 - **Dynamic Image Discovery**: Scans and loads **any** TIFF image files present in the folder, rather than requiring hardcoded PR/PD channels.
 - **Automatic Lock-in Pairing**: Automatically detects matching in-phase ($X$) and quadrature ($Y$) pairs (e.g. `X_PD` & `Y_PD`, `X_PR` & `Y_PR`, or `*_X` & `*_Y`) and computes:
   - Amplitude: $R = \sqrt{X^2 + Y^2}$
   - Phase: $\theta = \text{atan2}(Y, X)$
   - Phase-Rotated: $X'(\phi) = X \cos\phi + Y \sin\phi$ and $Y'(\phi) = -X \sin\phi + Y \cos\phi$
-- **Channel Manager Dialog** (`Ctrl+M` or Tools menu):
-  - **Hierarchical Subfolder Tree**: Organized by Dataset, with dedicated collapsible subfolders for **Raw Channels** (direct TIFF image scans on disk) and **Derived Channels** (further grouped into Lock-in Pairs, Ratios, Differences, and Custom quantities).
-  - **Multi-Dataset Support**: Seamlessly displays both Harmonics Domain and Time Domain datasets when transformed.
-  - **Live Filter**: Instant search bar to filter channels across all subfolders.
-  - **Create Lock-in Pair**: Select any two channels to act as $X$ and $Y$ and automatically generate $R$, $\theta$, and rotated components $X', Y'$.
-  - **Create Ratio Channel**: Compute $A / B$ (e.g. signal normalized by laser power or reflection).
-  - **Create Difference Channel**: Compute $A - B$ (e.g. background subtraction or differential contrast).
+- **Signal Workbench & Channel Manager** (`Ctrl+M` or Tools menu):
+  - **Modeless Multi-Screen Operation**: Operates as a non-blocking workbench window that can stay open side-by-side or on a secondary monitor while interacting with the main window.
+  - **Live Channel Inspector & Preview**: Renders instant 2D image previews of selected channels across any scan step with independent colormaps.
+  - **Channel Quality & Health Statistics**: Measures dynamic range (Min, Max, Peak-to-Peak), Mean $\pm$ RMS noise, dimensions, and estimated **Signal-to-Noise Ratio (SNR in dB)** measured against image corners.
+  - **Arbitrary NumPy Expression Engine**: Safe mathematical formula evaluator supporting free-form expressions (e.g. `(PR_R - 0.002) / np.maximum(1e-5, PD_R)`, `(A - B) / (A + B)`, `PR_X * 1e6`) with live syntax/range validation and presets.
+  - **Instant Canvas Dispatching**: Double-click any channel to load into the main 2D view, or use 1-click dispatch buttons (`Send to Dual View (Left/Right)`, `Set as Overlay Top/Base`).
+  - **Favorites (⭐)**: Star frequently inspected channels; starred channels automatically float to the top of all dropdown selectors in the application.
+  - **Selective Batch Export**: Export individual channels across active scans or entire multi-step series to 32-bit TIFF stacks or CSV files.
 
 ### 2. Multi-Layer Overlay & Blending (Any Channel on Any Channel)
 - **Arbitrary Layer Selection**: Choose **ANY** available channel as the Bottom (Base) layer and **ANY** channel as the Top (Overlay) layer.
@@ -68,8 +81,18 @@ The application is tailored for lock-in SLM acquisitions where each scan step co
   - **Custom**: User-editable spinboxes for any setup.
 - Invert Y-axis option (toggle origin between lower and upper).
 
-### 5. Interactive Inspection Tools
+### 5. Interactive Inspection & Usability Tools
 - **Crosshair Inspection**: Click any pixel to inspect real-time coordinates, pixel indices, and signal value.
+- **Calibrated Physical Scale Bar**: Automatically renders a dynamic, publication-ready scale bar in the bottom-right corner (using rounded step sizes: $1, 2, 5, 10, 20, 50, 100\,\mu\text{m}$) that adapts dynamically during pan and zoom.
+- **Distance Caliper Tool**: Click and drag across any sample feature to measure distance ($L$, $\Delta X$, $\Delta Y$ in $\mu\text{m}$ or $\text{V}$) with live dimension line and on-canvas annotation.
+- **Interactive Real-Time Histogram & Contrast Sliders**: 80-bin pixel distribution histogram with draggable threshold lines (`#00e5ff` for Min, `#ff3366` for Max), `Log Y` scale toggle, precision spinboxes, and percentile presets (`Min-Max`, `1%-99%`, `2%-98%`, `5%-95%`).
+- **Quick-Switch Channel Shortcuts**: Segmented pill buttons and single-key shortcuts:
+  - <kbd>1</kbd>: Photodiode reflection baseline (`PD`)
+  - <kbd>2</kbd>: Photoresponse signal (`PR`)
+  - <kbd>3</kbd>: PR on PD blended overlay
+  - <kbd>4</kbd>: Dual side-by-side comparison view
+- **Recent Datasets History**: `File -> Open Recent Dataset` submenu and sidebar `📂 Recent ▾` button storing the last 10 accessed datasets for 1-click loading.
+- **Series Movie / Time-Domain Animation Player**: Play/Pause transport controls with adjustable playback speed ($1$ to $60\text{ fps}$) and loop toggle for dynamic visual review of multi-step or time-domain data.
 - **1D Line Profile Cut & Laser Beam $1/e^2$ Size Fitting**:
   - Draw arbitrary cut line across the 2D image, or use quick Horizontal / Vertical mid-cuts.
   - Interactive 1D profile plot showing signal vs distance along the cut with peak/min/mean readouts.
@@ -115,8 +138,10 @@ The application is tailored for lock-in SLM acquisitions where each scan step co
 
 ### 9. Export Capabilities
 - Export 2D image as 32-bit floating point TIFF, publication-quality PNG, or PDF figure.
-- Export 1D line profile to CSV.
-- Export Run Series trend to CSV.
+- **Export Series as Animated GIF Movie**: Export multi-step or time-domain series into an animated `.gif` with customizable FPS and looping.
+- **Selective Batch Channel Export**: Export specific raw or derived channels across all 300 series steps to numbered TIFF files or CSVs with progress tracking.
+- Export 1D line profile cuts to CSV.
+- Export Run Series trend curves to CSV.
 - Export Batch Summary table (all run steps with ROI statistics and auto-phases) to CSV.
 
 ---
