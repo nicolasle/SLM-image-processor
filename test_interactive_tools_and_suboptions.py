@@ -153,14 +153,23 @@ def test_interactive_tools_and_suboptions():
     assert window.dual_view.canvas_right.crosshair_pos == (25, 25)
     print("  [OK] Crosshair inspection and readout synchronized across Dual View")
 
-    # 5. Invert Y-Axis in Dual View
+    # 5. Invert Y-Axis in Dual View and Single View
     window.chk_invert_y.setChecked(True)
     assert window.dual_view.canvas_left.invert_y is True
     assert window.dual_view.canvas_right.invert_y is True
+    assert window.canvas_2d.invert_y is True
+    assert window.dual_view.canvas_left.ax.get_ylim()[0] > window.dual_view.canvas_left.ax.get_ylim()[1]
+    assert window.dual_view.canvas_right.ax.get_ylim()[0] > window.dual_view.canvas_right.ax.get_ylim()[1]
+    assert window.canvas_2d.ax.get_ylim()[0] > window.canvas_2d.ax.get_ylim()[1]
+
     window.chk_invert_y.setChecked(False)
     assert window.dual_view.canvas_left.invert_y is False
     assert window.dual_view.canvas_right.invert_y is False
-    print("  [OK] Invert Y-Axis toggles both Dual View canvases")
+    assert window.canvas_2d.invert_y is False
+    assert window.dual_view.canvas_left.ax.get_ylim()[0] < window.dual_view.canvas_left.ax.get_ylim()[1]
+    assert window.dual_view.canvas_right.ax.get_ylim()[0] < window.dual_view.canvas_right.ax.get_ylim()[1]
+    assert window.canvas_2d.ax.get_ylim()[0] < window.canvas_2d.ax.get_ylim()[1]
+    print("  [OK] Invert Y-Axis toggles both Dual View and Single View canvases with axis inversion verified")
 
     # -------------------------------------------------------------
     # PART 3: Tab Navigation & Trend Analysis

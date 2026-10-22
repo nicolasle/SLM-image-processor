@@ -222,8 +222,10 @@ class SLMDualView(QWidget):
 
     def set_invert_y(self, invert: bool):
         """Sets Y-axis inversion across both canvases."""
+        self._updating = True
         self.canvas_left.set_invert_y(invert)
         self.canvas_right.set_invert_y(invert)
+        self._updating = False
 
     def set_aspect_mode(self, mode: str):
         """Sets aspect ratio mode across both canvases."""

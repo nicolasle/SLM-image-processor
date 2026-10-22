@@ -242,6 +242,10 @@ class SLMOverlayView(QWidget):
         if self.canvas_2d.line_points:
             self._update_dual_line_cut(*self.canvas_2d.line_points)
 
+    def set_invert_y(self, invert: bool):
+        """Sets Y-axis inversion on overlay 2D canvas."""
+        self.canvas_2d.set_invert_y(invert)
+
     def _on_cbar_alpha_toggled(self, checked: bool):
         if checked and self.slider_alpha.value() != 100:
             self.slider_alpha.setValue(100)

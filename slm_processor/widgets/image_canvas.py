@@ -272,8 +272,20 @@ class SLMImageCanvas(QWidget):
             self.canvas.draw_idle()
 
     def set_invert_y(self, invert: bool):
-        self.invert_y = invert
-        self.redraw_image(preserve_limits=True)
+        """Inverts or restores Y-axis orientation (e.g. Origin Top vs. Origin Bottom)."""
+        self.invert_y = bool(invert)
+        if self.ax is not None and self.image_data is not None:
+            self._updating_limits = True
+            y0, y1 = self.ax.get_ylim()
+            y_low = min(y0, y1)
+            y_high = max(y0, y1)
+            if self.invert_y:
+                self.ax.set_ylim(y_high, y_low)
+            else:
+                self.ax.set_ylim(y_low, y_high)
+            self._updating_limits = False
+            self.limits_changed.emit(self.ax.get_xlim(), self.ax.get_ylim())
+            self.canvas.draw_idle()
 
     def set_mode(self, mode: str):
         """Sets interaction mode: 'navigate', 'crosshair', 'line', 'roi'."""
@@ -331,6 +343,7 @@ class SLMImageCanvas(QWidget):
         else:
             self.ax.set_ylim(ymin, ymax)
         self._updating_limits = False
+        self.toolbar.update()
         self.limits_changed.emit(self.ax.get_xlim(), self.ax.get_ylim())
         self.canvas.draw_idle()
 
@@ -424,9 +437,6 @@ class SLMImageCanvas(QWidget):
             cbar_target = self.im_artist
             cbar_label = "Signal"
 
-        if self.invert_y:
-            self.ax.invert_yaxis()
-
         # Styling
         self.ax.set_title(self.title_text, color="#e0e0e0", fontsize=11, fontweight="bold", pad=8)
         self.ax.set_xlabel(f"X Mirror ({self.unit_label})", color="#cccccc", fontsize=9)
@@ -450,10 +460,23 @@ class SLMImageCanvas(QWidget):
         self._create_overlays()
         self._connect_axis_callbacks()
 
-        # Restore limits if requested and valid
+        # Restore limits if requested and valid, respecting invert_y
         if prev_xlim is not None and prev_ylim is not None:
             self.ax.set_xlim(prev_xlim)
-            self.ax.set_ylim(prev_ylim)
+            y_low = min(prev_ylim)
+            y_high = max(prev_ylim)
+            if self.invert_y:
+                self.ax.set_ylim(y_high, y_low)
+            else:
+                self.ax.set_ylim(y_low, y_high)
+        else:
+            if self.invert_y:
+                self.ax.set_ylim(ymax, ymin)
+            else:
+                self.ax.set_ylim(ymin, ymax)
+
+        if not preserve_limits:
+            self.toolbar.update()
 
         self._updating_limits = False
         self.canvas.draw_idle()

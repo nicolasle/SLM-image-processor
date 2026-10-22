@@ -1371,6 +1371,8 @@ class SLMMainWindow(QMainWindow):
         self.canvas_2d.set_invert_y(invert)
         if hasattr(self, "dual_view"):
             self.dual_view.set_invert_y(invert)
+        if hasattr(self, "overlay_view") and self.overlay_view is not None:
+            self.overlay_view.set_invert_y(invert)
 
     def _on_tool_mode_changed(self, button):
         mode_idx = self.btn_group_tools.id(button)
