@@ -17,20 +17,47 @@ from collections import defaultdict
 def extract_clean_channel_name(filename: str) -> str:
     """Extracts standardized channel identifier (PR_X, PR_Y, PD_X, PD_Y, etc.) from filename."""
     base, _ = os.path.splitext(filename) if "." in filename else (filename, "")
-    is_pd = bool(re.search(r'(?:^|[_\W])PD(?:[_\W]|$)', base, re.IGNORECASE))
-    is_x = bool(re.search(r'(?:^|[_\W])X(?:[_\W]|$)', base, re.IGNORECASE))
-    is_y = bool(re.search(r'(?:^|[_\W])Y(?:[_\W]|$)', base, re.IGNORECASE))
+
+    # Match X or Xs, Y or Ys as discrete tokens (e.g., Xs_P4, _Xs_, _X_, X_PD, Harm1_X)
+    is_x = bool(re.search(r'(?:^|[_\W])X(?:s)?(?:[_\W]|$)', base, re.IGNORECASE))
+    is_y = bool(re.search(r'(?:^|[_\W])Y(?:s)?(?:[_\W]|$)', base, re.IGNORECASE))
+
+    # Match Photodiode (PD, Photodiode, Diode)
+    is_pd = bool(re.search(r'(?:^|[_\W])(?:PD|Photodiode|Diode)(?:[_\W]|$)', base, re.IGNORECASE))
+
+    # Match Photoresponse (PR, P4 4-point, P2 2-point, Photoresponse, RF, Harm)
+    is_p4 = bool(re.search(r'(?:^|[_\W])P4(?:[_\W]|$)', base, re.IGNORECASE))
+    is_p2 = bool(re.search(r'(?:^|[_\W])P2(?:[_\W]|$)', base, re.IGNORECASE))
+    is_pr = bool(re.search(r'(?:^|[_\W])(?:PR|Photoresponse|RF)(?:[_\W]|$)', base, re.IGNORECASE))
+
+    # Harm without PD indicates RF / Photoresponse
+    if not is_pd and not is_pr and not is_p4 and not is_p2:
+        if bool(re.search(r'(?:^|[_\W])Harm\d*(?:[_\W]|$)', base, re.IGNORECASE)):
+            is_pr = True
 
     if is_pd:
-        if is_x:
+        if is_x and not is_y:
             return "PD_X"
-        elif is_y:
+        elif is_y and not is_x:
             return "PD_Y"
         return "PD"
-    else:
-        if is_x:
+    elif is_p4 or is_pr or (is_x != is_y and not is_pd):
+        # Maps 4-point or general lock-in response to standardized PR channel
+        if is_x and not is_y:
             return "PR_X"
-        elif is_y:
+        elif is_y and not is_x:
+            return "PR_Y"
+        return "PR"
+    elif is_p2:
+        if is_x and not is_y:
+            return "P2_X"
+        elif is_y and not is_x:
+            return "P2_Y"
+        return "P2"
+    else:
+        if is_x and not is_y:
+            return "PR_X"
+        elif is_y and not is_x:
             return "PR_Y"
         parts = re.split(r'[_\W]+', base)
         return parts[-1] if parts else base
@@ -104,6 +131,14 @@ class SLMScan:
             "Y_PR": "PR_Y", "PR_Y": "Y_PR",
             "X_PD": "PD_X", "PD_X": "X_PD",
             "Y_PD": "PD_Y", "PD_Y": "Y_PD",
+            "P4_X": "PR_X", "PR_X": "P4_X",
+            "P4_Y": "PR_Y", "PR_Y": "P4_Y",
+            "P4_R": "PR_R", "PR_R": "P4_R",
+            "P2_X": "PR_X", "PR_X": "P2_X",
+            "P2_Y": "PR_Y", "PR_Y": "P2_Y",
+            "P2_R": "PR_R", "PR_R": "P2_R",
+            "PR": "PR_R",
+            "PD": "PD_R",
         }
         if channel_name in alias_map:
             alt = alias_map[channel_name]
@@ -158,9 +193,12 @@ class SLMScan:
             base_name, _ = os.path.splitext(fname)
             p = os.path.join(folder_path, fname)
             try:
+                chan_name = extract_clean_channel_name(fname)
                 with Image.open(p) as img:
                     arr = np.array(img, dtype=np.float32)
-                    scan.raw_channels[base_name] = arr
+                    scan.raw_channels[chan_name] = arr
+                    if base_name != chan_name:
+                        scan.raw_channels[base_name] = arr
             except Exception as e:
                 print(f"Warning: could not read {p}: {e}")
 
@@ -196,6 +234,17 @@ class SLMScan:
         """Heuristics to pair X and Y lock-in components automatically."""
         raw_keys = list(set(self.raw_channels.keys()) | set(self.file_paths.keys()))
 
+        # Check explicit PR and PD pairs
+        if ("PR_X" in raw_keys or "X_PR" in raw_keys) and ("PR_Y" in raw_keys or "Y_PR" in raw_keys):
+            x_k = "PR_X" if "PR_X" in raw_keys else "X_PR"
+            y_k = "PR_Y" if "PR_Y" in raw_keys else "Y_PR"
+            self.add_lockin_pair("PR", x_chan=x_k, y_chan=y_k)
+
+        if ("PD_X" in raw_keys or "X_PD" in raw_keys) and ("PD_Y" in raw_keys or "Y_PD" in raw_keys):
+            x_k = "PD_X" if "PD_X" in raw_keys else "X_PD"
+            y_k = "PD_Y" if "PD_Y" in raw_keys else "Y_PD"
+            self.add_lockin_pair("PD", x_chan=x_k, y_chan=y_k)
+
         # Pattern 1: X_<tag> and Y_<tag> (e.g. X_PD, Y_PD, X_PR, Y_PR)
         for k in raw_keys:
             if k.upper().startswith("X_"):
@@ -208,7 +257,7 @@ class SLMScan:
                 if y_key:
                     self.add_lockin_pair(tag, x_chan=k, y_chan=y_key)
 
-            # Pattern 2: <tag>_X and <tag>_Y (e.g. PR_X, PR_Y, PD_X, PD_Y)
+            # Pattern 2: <tag>_X and <tag>_Y (e.g. PR_X, PR_Y, PD_X, PD_Y, P4_X, P4_Y)
             elif k.upper().endswith("_X"):
                 tag = k[:-2]
                 y_key = None
@@ -219,14 +268,33 @@ class SLMScan:
                 if y_key:
                     self.add_lockin_pair(tag, x_chan=k, y_chan=y_key)
 
+            # Pattern 3: Embedded Xs and Ys (e.g. 3.22K_Xs_P4 and 3.22K_Ys_P4)
+            elif re.search(r'(?:^|[_\W])Xs(?:[_\W]|$)', k, re.IGNORECASE):
+                expected_y = re.sub(r'([_\W]|^)Xs([_\W]|$)', r'\1Ys\2', k, flags=re.IGNORECASE)
+                if expected_y in raw_keys and expected_y != k:
+                    tag_match = re.search(r'Xs[_\W]+([a-zA-Z0-9]+)', k, re.IGNORECASE)
+                    tag = tag_match.group(1) if tag_match else "Lockin"
+                    if tag.upper() in ("P4", "PR"):
+                        tag = "PR"
+                    elif tag.upper() == "PD":
+                        tag = "PD"
+                    if f"{tag}_R" not in self.derived_defs:
+                        self.add_lockin_pair(tag, x_chan=k, y_chan=expected_y)
+
         # Auto-create common ratio if PR and PD pairs exist
         avail = self.available_channels
-        if "PR_R" in avail and "PD_R" in avail:
-            self.add_ratio_channel("Norm_R (PR_R / PD_R)", "PR_R", "PD_R")
-        if "PR_X" in avail and "PD_X" in avail:
-            self.add_ratio_channel("Norm_X (PR_X / |PD_X|)", "PR_X", "PD_X")
-        if "X_PR" in avail and "X_PD" in avail:
-            self.add_ratio_channel("Norm_X (X_PR / |X_PD|)", "X_PR", "X_PD")
+        has_pr_r = "PR_R" in avail or "P4_R" in avail
+        pr_r_name = "PR_R" if "PR_R" in avail else "P4_R"
+        has_pd_r = "PD_R" in avail
+        if has_pr_r and has_pd_r:
+            self.add_ratio_channel("Norm_R (PR_R / PD_R)", pr_r_name, "PD_R")
+
+        has_pr_x = "PR_X" in avail or "P4_X" in avail or "X_PR" in avail
+        pr_x_name = "PR_X" if "PR_X" in avail else ("P4_X" if "P4_X" in avail else "X_PR")
+        has_pd_x = "PD_X" in avail or "X_PD" in avail
+        pd_x_name = "PD_X" if "PD_X" in avail else "X_PD"
+        if has_pr_x and has_pd_x:
+            self.add_ratio_channel("Norm_X (PR_X / |PD_X|)", pr_x_name, pd_x_name)
 
     # --- Channel Definition Methods ---
 
@@ -308,6 +376,14 @@ class SLMScan:
             "Y_PR": "PR_Y", "PR_Y": "Y_PR",
             "X_PD": "PD_X", "PD_X": "X_PD",
             "Y_PD": "PD_Y", "PD_Y": "Y_PD",
+            "P4_X": "PR_X", "PR_X": "P4_X",
+            "P4_Y": "PR_Y", "PR_Y": "P4_Y",
+            "P4_R": "PR_R", "PR_R": "P4_R",
+            "P2_X": "PR_X", "PR_X": "P2_X",
+            "P2_Y": "PR_Y", "PR_Y": "P2_Y",
+            "P2_R": "PR_R", "PR_R": "P2_R",
+            "PR": "PR_R",
+            "PD": "PD_R",
         }
         if channel_name in alias_map:
             alt = alias_map[channel_name]
@@ -354,11 +430,10 @@ class SLMScan:
         elif ch == "PD_R" and self.has_channel("PD_X") and self.has_channel("PD_Y"):
             return np.hypot(self.get_channel("PD_X"), self.get_channel("PD_Y"))
 
-        # Fallback to first channel if unknown
-        avail = list(self.raw_channels.keys()) + list(self.file_paths.keys())
-        if avail:
-            return self.get_channel(avail[0])
-
+        # Fallback for missing channels: return zeros with correct shape instead of arbitrary first channel
+        rows, cols = self.shape
+        if rows > 0 and cols > 0:
+            return np.zeros((rows, cols), dtype=np.float32)
         return np.zeros((1, 1), dtype=np.float32)
 
     def calculate_auto_phase(self, x_chan: Optional[str] = None, y_chan: Optional[str] = None) -> float:
@@ -452,15 +527,26 @@ class SLMDataset:
         loaded_scans.sort(key=lambda s: s.step_value)
         self.scans = loaded_scans
 
+        # Propagate reference PD to any scans in the series that lack PD channels
+        scans_with_pd = [s for s in self.scans if s.has_channel("PD_X") and s.has_channel("PD_Y")]
+        if scans_with_pd and len(scans_with_pd) < len(self.scans):
+            for s in self.scans:
+                if not s.has_channel("PD_X") or not s.has_channel("PD_Y"):
+                    nearest = min(scans_with_pd, key=lambda other: abs(other.step_value - s.step_value))
+                    for ch in ["PD_X", "PD_Y"]:
+                        if ch in nearest.file_paths and ch not in s.file_paths:
+                            s.file_paths[ch] = nearest.file_paths[ch]
+                        elif ch in nearest.raw_channels and ch not in s.raw_channels:
+                            s.raw_channels[ch] = nearest.raw_channels[ch]
+                    s._auto_detect_lockin_pairs()
+
     def _detect_flat_series(self, tiffs: List[str]) -> Optional[Dict[str, Any]]:
-        # Patterns to check for variable stepping tokens
+        # 1. Standard series tokens
         patterns = [
             (r'Harm(\d+)', 'Harmonic'),
             (r'Step[_-]?(\d+(?:\.\d+)?)', 'Step'),
             (r'Run[_-]?(\d+(?:\.\d+)?)', 'Run'),
             (r'Scan[_-]?(\d+(?:\.\d+)?)', 'Scan'),
-            (r'(\d+(?:\.\d+)?)\s*(?:V|mV|K|mK|GHz|MHz|Hz|um|nm|deg)', 'ParamWithUnit'),
-            (r'_(\d{1,5})[_\.]', 'NumericIndex'),
         ]
 
         # Auto-detect chopper / LIA reference frequency if encoded in filenames (e.g. fchop180Hz)
@@ -495,6 +581,44 @@ class SLMDataset:
                     'regex': pat,
                     'groups': groups
                 }
+
+        # 2. Parameter with physical units (find which unit actually varies across scans)
+        units_pat = r'(\d+(?:\.\d+)?)\s*(uA|mA|nA|pA|A|V|mV|uV|K|mK|GHz|MHz|kHz|Hz|um|nm|deg|ms|s)(?:_|[^\w]|$)'
+        unit_groups = defaultdict(lambda: defaultdict(list))
+        for f in tiffs:
+            for m in re.finditer(units_pat, f, re.IGNORECASE):
+                val = float(m.group(1))
+                unit = m.group(2).upper()
+                unit_groups[unit][val].append(f)
+
+        best_unit = None
+        best_count = 1
+        for unit, val_dict in unit_groups.items():
+            if len(val_dict) > best_count:
+                best_count = len(val_dict)
+                best_unit = unit
+
+        if best_unit is not None:
+            var_name = f"Param ({best_unit})"
+            unit_pat = rf'(\d+(?:\.\d+)?)\s*{re.escape(best_unit)}(?:_|[^\w]|$)'
+            return {
+                'var_name': var_name,
+                'regex': unit_pat,
+                'groups': unit_groups[best_unit]
+            }
+
+        # 3. Fallback to generic numeric index
+        groups = defaultdict(list)
+        for f in tiffs:
+            m = re.search(r'_(\d{1,5})[_\.]', f)
+            if m:
+                groups[float(m.group(1))].append(f)
+        if len(groups) > 1:
+            return {
+                'var_name': 'Index',
+                'regex': r'_(\d{1,5})[_\.]',
+                'groups': groups
+            }
 
         return None
 
@@ -555,6 +679,19 @@ class SLMDataset:
 
             scan._auto_detect_lockin_pairs()
             self.scans.append(scan)
+
+        # Propagate reference PD to any scans in the series that lack PD channels
+        scans_with_pd = [s for s in self.scans if s.has_channel("PD_X") and s.has_channel("PD_Y")]
+        if scans_with_pd and len(scans_with_pd) < len(self.scans):
+            for s in self.scans:
+                if not s.has_channel("PD_X") or not s.has_channel("PD_Y"):
+                    nearest = min(scans_with_pd, key=lambda other: abs(other.step_value - s.step_value))
+                    for ch in ["PD_X", "PD_Y"]:
+                        if ch in nearest.file_paths and ch not in s.file_paths:
+                            s.file_paths[ch] = nearest.file_paths[ch]
+                        elif ch in nearest.raw_channels and ch not in s.raw_channels:
+                            s.raw_channels[ch] = nearest.raw_channels[ch]
+                    s._auto_detect_lockin_pairs()
 
     def convert_harmonics_to_timedomain(
         self,

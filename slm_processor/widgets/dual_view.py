@@ -142,7 +142,7 @@ class SLMDualView(QWidget):
         if curr_l in channels:
             self.combo_left.setCurrentText(curr_l)
         else:
-            for c in ["PD_R", "X_PD", "PD_X"]:
+            for c in ["PD_R", "X_PD", "PD_X", "PD"]:
                 if c in channels:
                     self.combo_left.setCurrentText(c)
                     break
@@ -153,7 +153,7 @@ class SLMDualView(QWidget):
         if curr_r in channels:
             self.combo_right.setCurrentText(curr_r)
         else:
-            for c in ["PR_R", "X_PR", "PR_X"]:
+            for c in ["PR_R", "X_PR", "PR_X", "PR", "P4_R", "P4_X", "P4"]:
                 if c in channels:
                     self.combo_right.setCurrentText(c)
                     break

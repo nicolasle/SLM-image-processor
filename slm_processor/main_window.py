@@ -971,7 +971,7 @@ class SLMMainWindow(QMainWindow):
         if curr_top in chans:
             self.combo_overlay_pr_chan.setCurrentText(curr_top)
         else:
-            for c in ["PR_R", "X_PR", "PR_X"]:
+            for c in ["PR_R", "X_PR", "PR_X", "PR", "P4_R", "P4_X", "P4"]:
                 if c in chans:
                     self.combo_overlay_pr_chan.setCurrentText(c)
                     break
@@ -982,7 +982,7 @@ class SLMMainWindow(QMainWindow):
         if curr_base in chans:
             self.combo_overlay_pd_chan.setCurrentText(curr_base)
         else:
-            for c in ["PD_R", "X_PD", "PD_X"]:
+            for c in ["PD_R", "X_PD", "PD_X", "PD"]:
                 if c in chans:
                     self.combo_overlay_pd_chan.setCurrentText(c)
                     break
@@ -1316,6 +1316,7 @@ class SLMMainWindow(QMainWindow):
             self.slider_steps.blockSignals(True)
             self.slider_steps.setValue(idx)
             self.slider_steps.blockSignals(False)
+            self._refresh_channel_dropdowns()
             self._update_display()
             # Update series highlight
             if self.series_metrics:

@@ -140,7 +140,7 @@ class SLMOverlayView(QWidget):
             self.combo_over_channel.setCurrentText(curr_over)
         else:
             # Default to PR_R or X_PR or 2nd channel
-            for ch in ["PR_R", "X_PR", "PR_X"]:
+            for ch in ["PR_R", "X_PR", "PR_X", "PR", "P4_R", "P4_X", "P4"]:
                 if ch in channels:
                     self.combo_over_channel.setCurrentText(ch)
                     break
@@ -152,7 +152,7 @@ class SLMOverlayView(QWidget):
             self.combo_base_channel.setCurrentText(curr_base)
         else:
             # Default to PD_R or X_PD or 1st channel
-            for ch in ["PD_R", "X_PD", "PD_X"]:
+            for ch in ["PD_R", "X_PD", "PD_X", "PD"]:
                 if ch in channels:
                     self.combo_base_channel.setCurrentText(ch)
                     break

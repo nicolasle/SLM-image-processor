@@ -246,7 +246,7 @@ class SLMChannelManagerDialog(QDialog):
                 continue
 
             scan0 = ds[0]
-            raw_keys = list(scan0.raw_channels.keys())
+            raw_keys = list(set(scan0.raw_channels.keys()) | set(scan0.file_paths.keys()))
             derived_defs = scan0.derived_defs
 
             total_raw += len(raw_keys)
