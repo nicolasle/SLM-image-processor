@@ -922,6 +922,7 @@ class SLMMainWindow(QMainWindow):
                 self.btn_hermitian_transform.setVisible(False)
                 self.btn_switch_domain.setVisible(False)
 
+            self.combo_contrast.setCurrentText("Min-Max")
             self._populate_dataset_ui()
             self._save_recent_dataset(dir_path)
             if hasattr(self, "channel_manager_dlg") and self.channel_manager_dlg and self.channel_manager_dlg.isVisible():
@@ -1293,13 +1294,10 @@ class SLMMainWindow(QMainWindow):
         self._update_quick_buttons_state()
 
     def _calc_contrast_limits(self, image: Optional[np.ndarray]) -> Optional[Tuple[float, float]]:
-        if image is None:
+        if image is None or image.size == 0:
             return None
         mode = self.combo_contrast.currentText()
-        if mode == "Min-Max":
-            vmin = float(np.min(image))
-            vmax = float(np.max(image))
-        elif mode == "1%-99%":
+        if mode == "1%-99%":
             vmin = float(np.percentile(image, 1.0))
             vmax = float(np.percentile(image, 99.0))
         elif mode == "2%-98%":
@@ -1308,8 +1306,13 @@ class SLMMainWindow(QMainWindow):
         elif mode == "5%-95%":
             vmin = float(np.percentile(image, 5.0))
             vmax = float(np.percentile(image, 95.0))
-        else:
+        elif mode == "Manual":
             return None
+        else:  # "Min-Max" or default fallback
+            vmin = float(np.min(image))
+            vmax = float(np.max(image))
+        if vmin >= vmax:
+            vmax = vmin + 1e-6
         return (vmin, vmax)
 
     def _apply_contrast(self, image: Optional[np.ndarray] = None):
@@ -1720,8 +1723,8 @@ class SLMMainWindow(QMainWindow):
                 if self.canvas_2d.clim_overlay is not None:
                     v0, v1 = self.canvas_2d.clim_overlay
                 else:
-                    v0 = float(np.percentile(self.current_processed_data, 1.0))
-                    v1 = float(np.percentile(self.current_processed_data, 99.0))
+                    v0 = float(np.min(self.current_processed_data))
+                    v1 = float(np.max(self.current_processed_data))
                 span = float(v1 - v0)
                 norm = float(np.clip((val_top - v0) / span, 0.0, 1.0)) if abs(span) > 1e-15 else 0.0
                 local_pct = norm * self.slider_overlay_alpha.value()
@@ -1781,6 +1784,7 @@ class SLMMainWindow(QMainWindow):
         self.combo_line_sub.setCurrentIndex(0)
         self.combo_filter.setCurrentIndex(0)
         self.spin_phase.setValue(0.0)
+        self.combo_contrast.setCurrentText("Min-Max")
         self._update_display()
 
     # --- Export Features ---

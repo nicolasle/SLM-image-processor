@@ -790,8 +790,8 @@ class SLMChannelManagerDialog(QDialog):
         self.ax_preview.set_facecolor("#141414")
         cmap_name = self.combo_preview_cmap.currentText()
 
-        v0 = float(np.percentile(arr, 1.0))
-        v1 = float(np.percentile(arr, 99.0))
+        v0 = float(np.min(arr))
+        v1 = float(np.max(arr))
         im = self.ax_preview.imshow(arr, cmap=cmap_name, origin="lower", vmin=v0, vmax=v1, interpolation="nearest")
 
         if self.preview_cbar is None:

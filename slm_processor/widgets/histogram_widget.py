@@ -170,8 +170,12 @@ class SLMHistogramWidget(QWidget):
         if self.current_data is None or self.current_data.size == 0:
             return
 
-        v0 = float(np.percentile(self.current_data, p_low))
-        v1 = float(np.percentile(self.current_data, p_high))
+        if p_low == 0.0 and p_high == 100.0:
+            v0 = float(np.min(self.current_data))
+            v1 = float(np.max(self.current_data))
+        else:
+            v0 = float(np.percentile(self.current_data, p_low))
+            v1 = float(np.percentile(self.current_data, p_high))
         if v0 >= v1:
             v1 = v0 + 1e-6
 

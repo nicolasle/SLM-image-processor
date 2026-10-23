@@ -236,8 +236,8 @@ class SLMImageCanvas(QWidget):
             if self.clim_overlay is not None:
                 v0, v1 = self.clim_overlay
             else:
-                v0 = float(np.percentile(self.overlay_data, 1.0))
-                v1 = float(np.percentile(self.overlay_data, 99.0))
+                v0 = float(np.min(self.overlay_data))
+                v1 = float(np.max(self.overlay_data))
 
             span = float(v1 - v0)
             if abs(span) > 1e-15:
@@ -457,8 +457,8 @@ class SLMImageCanvas(QWidget):
             if self.clim is not None:
                 v_b0, v_b1 = self.clim
             else:
-                v_b0 = float(np.percentile(self.image_data, 1.0))
-                v_b1 = float(np.percentile(self.image_data, 99.0))
+                v_b0 = float(np.min(self.image_data))
+                v_b1 = float(np.max(self.image_data))
             self.im_artist = self.ax.imshow(
                 self.image_data,
                 extent=extent,
@@ -473,8 +473,8 @@ class SLMImageCanvas(QWidget):
             if self.clim_overlay is not None:
                 v_o0, v_o1 = self.clim_overlay
             else:
-                v_o0 = float(np.percentile(self.overlay_data, 1.0))
-                v_o1 = float(np.percentile(self.overlay_data, 99.0))
+                v_o0 = float(np.min(self.overlay_data))
+                v_o1 = float(np.max(self.overlay_data))
 
             eff_alpha = self._compute_effective_alpha()
 
@@ -496,8 +496,8 @@ class SLMImageCanvas(QWidget):
                 cbar_label = f"Overlay: {getattr(self, 'overlay_channel_name', 'Photoresponse')}"
         else:
             self.overlay_artist = None
-            vmin = self.clim[0] if self.clim else None
-            vmax = self.clim[1] if self.clim else None
+            vmin = self.clim[0] if self.clim is not None else float(np.min(self.image_data))
+            vmax = self.clim[1] if self.clim is not None else float(np.max(self.image_data))
 
             self.im_artist = self.ax.imshow(
                 self.image_data,

@@ -226,10 +226,10 @@ class SLMOverlayView(QWidget):
         else:
             title = f"Scan: {self.current_scan.step_name} | {over_name} on {base_name} (α={self.alpha_val*100:.0f}%)"
 
-        v_b0 = float(np.percentile(base_img, 1.0))
-        v_b1 = float(np.percentile(base_img, 99.0))
-        v_o0 = float(np.percentile(over_img, 1.0))
-        v_o1 = float(np.percentile(over_img, 99.0))
+        v_b0 = float(np.min(base_img))
+        v_b1 = float(np.max(base_img))
+        v_o0 = float(np.min(over_img))
+        v_o1 = float(np.max(over_img))
 
         self.canvas_2d.set_overlay_data(
             base_image=base_img,
@@ -320,8 +320,8 @@ class SLMOverlayView(QWidget):
             if self.canvas_2d.clim_overlay is not None:
                 v0, v1 = self.canvas_2d.clim_overlay
             else:
-                v0 = float(np.percentile(self.current_over_img, 1.0))
-                v1 = float(np.percentile(self.current_over_img, 99.0))
+                v0 = float(np.min(self.current_over_img))
+                v1 = float(np.max(self.current_over_img))
             span = float(v1 - v0)
             norm = float(np.clip((val_over - v0) / span, 0.0, 1.0)) if abs(span) > 1e-15 else 0.0
             local_pct = norm * (self.alpha_val * 100.0)
