@@ -37,6 +37,9 @@ class SLMProfileCanvas(QWidget):
         self.line_artist = None
         self.line_pr = None
         self.line_pd = None
+        self.is_overlay: bool = False
+        self.label_pr: str = "Signal"
+        self.label_pd: Optional[str] = None
 
         # Figure setup
         self.fig = Figure(figsize=(5, 2.7), dpi=100)
@@ -160,10 +163,14 @@ class SLMProfileCanvas(QWidget):
         self.distances = distances
         self.values = values
         self.values_pd = None
+        self.is_overlay = False
+        self.label_pr = "Signal"
+        self.label_pd = None
         self.unit_label = unit
         self.calib_um_per_v = calib_um_per_v
         self.title_label.setText(title)
         self.combo_fit_channel.setVisible(False)
+        self.combo_fit_channel.setEnabled(True)
 
         self._clear_fit_artists()
 
@@ -222,18 +229,36 @@ class SLMProfileCanvas(QWidget):
         title: str = "1D Profile: PR on PD",
         calib_um_per_v: Optional[float] = None,
         label_pr: str = "PR Signal",
-        label_pd: str = "PD Baseline"
+        label_pd: str = "PD Baseline",
+        is_overlay: bool = False
     ):
         self.distances = distances
         self.values = values_pr
         self.values_pd = values_pd
         self.unit_label = unit
         self.calib_um_per_v = calib_um_per_v
+        self.label_pr = label_pr
+        self.label_pd = label_pd
+        self.is_overlay = is_overlay
         self.title_label.setText(title)
+
         self.combo_fit_channel.setVisible(True)
         self.combo_fit_channel.blockSignals(True)
-        self.combo_fit_channel.setItemText(0, f"Fit: {label_pr}")
-        self.combo_fit_channel.setItemText(1, f"Fit: {label_pd}")
+        self.combo_fit_channel.clear()
+
+        if is_overlay:
+            # In overlay mode, Erf knife-edge beam fit is always made on the bottom layer
+            self.combo_fit_channel.addItem(f"Fit: {label_pd} (Bottom Layer)", "pd")
+            self.combo_fit_channel.setCurrentIndex(0)
+            self.combo_fit_channel.setEnabled(False)
+            self.combo_fit_channel.setToolTip("In overlay mode, Erf beam fit is always made on the bottom layer.")
+        else:
+            self.combo_fit_channel.addItem(f"Fit: {label_pr}", "signal")
+            self.combo_fit_channel.addItem(f"Fit: {label_pd}", "pd")
+            self.combo_fit_channel.setCurrentIndex(0)
+            self.combo_fit_channel.setEnabled(True)
+            self.combo_fit_channel.setToolTip("Select channel for Erf beam fit")
+
         self.combo_fit_channel.blockSignals(False)
 
         self._clear_fit_artists()
@@ -296,7 +321,9 @@ class SLMProfileCanvas(QWidget):
         if self.distances is None or len(self.distances) < 4:
             return
 
-        if self.values_pd is not None and self.combo_fit_channel.currentIndex() == 1:
+        if self.is_overlay and self.values_pd is not None:
+            y_target = self.values_pd
+        elif self.values_pd is not None and (self.combo_fit_channel.currentData() == "pd" or self.combo_fit_channel.currentIndex() == 1):
             y_target = self.values_pd
         else:
             y_target = self.values
@@ -320,11 +347,18 @@ class SLMProfileCanvas(QWidget):
             self.lbl_fit_badge.setText(f"Fit Notice: {res.message}")
             self.lbl_fit_badge.setStyleSheet("color: #ffaa66; font-size: 10px; font-weight: bold;")
             self.fit_banner.show()
+            self._clear_fit_artists()
             return
+
+        target_name = (
+            getattr(self, "label_pd", "Bottom Layer")
+            if (self.is_overlay or self.combo_fit_channel.currentData() == "pd")
+            else getattr(self, "label_pr", "Signal")
+        )
 
         # Format informative badge string
         badge = (
-            f"⚡ Laser Beam 1/e²:  Radius w = {res.w:.4g} {self.unit_label}  |  "
+            f"⚡ Laser Beam 1/e² ({target_name}):  Radius w = {res.w:.4g} {self.unit_label}  |  "
             f"Diameter 2w = {res.diameter:.4g} {self.unit_label}  |  "
             f"FWHM = {res.fwhm:.4g} {self.unit_label}  |  R² = {res.r_squared:.4f}"
         )
@@ -347,11 +381,11 @@ class SLMProfileCanvas(QWidget):
         if res.x_fit is None or res.y_fit is None:
             return
 
-        target_ax = self.ax_twin if (
+        is_pd_fit = (
             self.values_pd is not None
-            and self.combo_fit_channel.currentIndex() == 1
-            and self.ax_twin is not None
-        ) else self.ax
+            and (self.is_overlay or self.combo_fit_channel.currentData() == "pd" or self.combo_fit_channel.currentIndex() == 1)
+        )
+        target_ax = self.ax_twin if (is_pd_fit and self.ax_twin is not None) else self.ax
 
         self.fit_artist, = target_ax.plot(
             res.x_fit, res.y_fit,
@@ -425,7 +459,9 @@ class SLMProfileCanvas(QWidget):
         self.canvas.draw_idle()
 
     def _open_fit_dialog(self):
-        if self.distances is None or self.values is None or len(self.distances) < 4:
+        if self.distances is None or len(self.distances) < 4:
+            return
+        if self.values is None and self.values_pd is None:
             return
 
         from slm_processor.widgets.erf_fit_dialog import SLMErfFitDialog
@@ -435,6 +471,9 @@ class SLMProfileCanvas(QWidget):
             values_pd=self.values_pd,
             unit=self.unit_label,
             calib_um_per_v=self.calib_um_per_v,
+            is_overlay=self.is_overlay,
+            label_top=getattr(self, "label_pr", "Top Layer"),
+            label_bottom=getattr(self, "label_pd", "Bottom Layer"),
             parent=self
         )
         dlg.fitApplied.connect(self.apply_fit_result)

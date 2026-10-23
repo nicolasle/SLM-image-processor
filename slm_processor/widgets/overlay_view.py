@@ -309,7 +309,10 @@ class SLMOverlayView(QWidget):
             values_pd=vals_base,
             unit=self.unit_label,
             title=f"Cut: {over_name} & {base_name} from ({c0:.0f}, {r0:.0f}) to ({c1:.0f}, {r1:.0f})",
-            calib_um_per_v=getattr(self, "calib_um_per_v", None)
+            calib_um_per_v=getattr(self, "calib_um_per_v", None),
+            label_pr=over_name,
+            label_pd=base_name,
+            is_overlay=True
         )
 
     def _on_overlay_hovered(self, col: int, row: int, x: float, y: float, val_over: float, val_base: float):

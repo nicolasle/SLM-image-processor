@@ -27,6 +27,9 @@ class SLMErfFitDialog(QDialog):
         values_pd: Optional[np.ndarray] = None,
         unit: str = "V",
         calib_um_per_v: Optional[float] = None,
+        is_overlay: bool = False,
+        label_top: str = "Top Layer",
+        label_bottom: str = "Bottom Layer",
         parent: Optional[QWidget] = None
     ):
         super().__init__(parent)
@@ -38,6 +41,9 @@ class SLMErfFitDialog(QDialog):
         self.values_pd = values_pd
         self.unit = unit
         self.calib_um_per_v = calib_um_per_v
+        self.is_overlay = is_overlay
+        self.label_top = label_top
+        self.label_bottom = label_bottom
 
         self.current_fit: Optional[ErfFitResult] = None
 
@@ -65,9 +71,16 @@ class SLMErfFitDialog(QDialog):
         # Channel Selector
         ctrl_layout.addWidget(QLabel("Target Channel:"))
         self.combo_channel = QComboBox()
-        self.combo_channel.addItem("Primary Signal", "signal")
-        if self.values_pd is not None:
-            self.combo_channel.addItem("PD Baseline", "pd")
+        if self.is_overlay and self.values_pd is not None:
+            self.combo_channel.addItem(f"Bottom Layer: {self.label_bottom}", "pd")
+            self.combo_channel.addItem(f"Top Layer: {self.label_top}", "signal")
+            self.combo_channel.setCurrentIndex(0)
+            self.combo_channel.setEnabled(False)
+            self.combo_channel.setToolTip("In overlay mode, Erf beam fit is always made on the bottom layer.")
+        else:
+            self.combo_channel.addItem(f"{self.label_top}", "signal")
+            if self.values_pd is not None:
+                self.combo_channel.addItem(f"{self.label_bottom}", "pd")
         self.combo_channel.currentIndexChanged.connect(self._run_fit)
         ctrl_layout.addWidget(self.combo_channel)
 
@@ -199,6 +212,8 @@ class SLMErfFitDialog(QDialog):
         self._run_fit()
 
     def _get_active_y(self) -> np.ndarray:
+        if self.is_overlay and self.values_pd is not None:
+            return self.values_pd
         channel = self.combo_channel.currentData()
         if channel == "pd" and self.values_pd is not None:
             return self.values_pd
@@ -229,6 +244,12 @@ class SLMErfFitDialog(QDialog):
             )
             return
 
+        target_name = (
+            self.label_bottom
+            if (self.is_overlay and self.values_pd is not None)
+            else (self.label_bottom if self.combo_channel.currentData() == "pd" else self.label_top)
+        )
+
         # Update banner
         self.lbl_banner.setStyleSheet(
             "background-color: #1e3a5f; color: #00e5ff; font-size: 13px; "
@@ -237,7 +258,7 @@ class SLMErfFitDialog(QDialog):
         banner_text = (
             f"1/e² Beam Radius w = {result.w:.4g} {self.unit}  |  "
             f"Diameter 2w = {result.diameter:.4g} {self.unit}  |  "
-            f"FWHM = {result.fwhm:.4g} {self.unit}  |  R² = {result.r_squared:.4f}"
+            f"FWHM = {result.fwhm:.4g} {self.unit}  |  R² = {result.r_squared:.4f}  [{target_name}]"
         )
         if self.unit == "V" and self.calib_um_per_v:
             w_um = result.w * self.calib_um_per_v
@@ -291,11 +312,19 @@ class SLMErfFitDialog(QDialog):
         self.ax_erf.set_facecolor("#1e1e1e")
         self.ax_erf.grid(True, color="#444444", linestyle="--", alpha=0.5)
 
+        target_name = (
+            self.label_bottom
+            if (self.is_overlay and self.values_pd is not None)
+            else (self.label_bottom if self.combo_channel.currentData() == "pd" else self.label_top)
+        )
+        is_pd = (self.is_overlay or self.combo_channel.currentData() == "pd")
+
         # Plot data
         self.ax_erf.plot(
             self.distances, y,
-            color="#ff3366" if self.combo_channel.currentData() == "signal" else "#00ffcc",
-            marker="o", markersize=3, linewidth=1.0, alpha=0.8, label="Measured Cut"
+            color="#00ffcc" if is_pd else "#ff3366",
+            marker="o", markersize=3, linewidth=1.0, alpha=0.8,
+            label=f"Measured Cut ({target_name})"
         )
 
         # Plot Erf fit
@@ -389,8 +418,14 @@ class SLMErfFitDialog(QDialog):
         if self.current_fit is None or not self.current_fit.success:
             return
         res = self.current_fit
+        target_name = (
+            self.label_bottom
+            if (self.is_overlay and self.values_pd is not None)
+            else (self.label_bottom if self.combo_channel.currentData() == "pd" else self.label_top)
+        )
         report = [
-            "=== Laser Beam 1/e² Size Fit Report (Erf Knife-Edge) ===",
+            f"=== Laser Beam 1/e² Size Fit Report (Erf Knife-Edge) - {target_name} ===",
+            f"Target Channel:            {target_name}",
             f"1/e² Beam Radius (w):     {res.w:.4g} ± {res.w_error:.3g} {self.unit}",
             f"1/e² Beam Diameter (2w):   {res.diameter:.4g} ± {res.diameter_error:.3g} {self.unit}",
             f"Beam FWHM (1.1774 w):      {res.fwhm:.4g} ± {res.fwhm_error:.3g} {self.unit}",

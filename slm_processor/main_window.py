@@ -1381,7 +1381,8 @@ class SLMMainWindow(QMainWindow):
         dx_per_pix = x_span / max(1, cols - 1)
         distances_phys = distances_pix * dx_per_pix
 
-        if hasattr(self, "current_base_data") and self.current_base_data is not None:
+        is_overlay = (self._get_current_channel_key() == "OVERLAY")
+        if is_overlay and hasattr(self, "current_base_data") and self.current_base_data is not None:
             _, values_base, _ = processing.extract_line_profile(
                 self.current_base_data, (c0, r0), (c1, r1)
             )
@@ -1392,7 +1393,8 @@ class SLMMainWindow(QMainWindow):
                 title=f"Cut: {top_name} & {base_name} from ({c0:.0f}, {r0:.0f}) to ({c1:.0f}, {r1:.0f})",
                 calib_um_per_v=self.calib_x_scale,
                 label_pr=top_name,
-                label_pd=base_name
+                label_pd=base_name,
+                is_overlay=True
             )
         else:
             self.canvas_profile.set_profile(
