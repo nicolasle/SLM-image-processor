@@ -118,11 +118,20 @@ The application is tailored for lock-in SLM acquisitions where each scan step co
 
 ### 6. Multi-View & Series Analysis
 - **Dual View Mode**: Side-by-side comparison of two channels (e.g. Photodiode $R_{PD}$ baseline vs Photoresponse $R_{PR}$) with optional synchronized zoom & pan.
-- **Run Series Trend**: Automatically plots ROI mean across all loaded run steps (`0`, `69`, `98`, `114`, `121`). Click any point on the trend plot to jump directly to that scan step.
+- **Run Series Trend & Multi-Metric Tracking**:
+  - Automatically plots signal evolution across all loaded run steps or controlled physical parameter variations. Click any point on the trend plot to jump directly to that scan step.
+  - **Filter & Phase Reactive**: Recomputes in real time as you adjust plane leveling, line-by-line subtraction, spatial filters ($\sigma$ / $k$), or lock-in phase angle.
+  - **Metric Selector**: Toggle between **Mean**, **Max (Peak)**, **Min**, **Std Dev**, **Peak-to-Peak**, and **Sum** inside an active rectangular ROI or globally across the full scan. Selecting Peak or Std Dev clearly reveals the noise suppression and smoothing effects of spatial filters across the entire scan series.
+  - **Direct CSV Export**: 1-click export of the active metric series with step names and parameter values to CSV for publication-ready external plotting.
 
-### 7. Smart Dataset Auto-Detection
+### 7. Smart Dataset Auto-Detection & Parameter Extraction
 - **Multi-folder hierarchy**: Folders containing subdirectories (e.g. `0/`, `69/`, `98/`, etc.).
 - **Flat Harmonic Series**: Large single folders containing hundreds of sequential scans (e.g. `Harm1` to `Harm300` or `Step0` to `StepN`).
+- **Pattern-Based Parameter Discovery**:
+  - Identifies repeating filename structures suffixed by channel identifiers (e.g. `_Xs_PD`, `_Xs_PR`, `_Ys_PD`, `_Ys_PR`).
+  - Isolates the changing token to identify controlled experimental parameters (such as laser power `Pow0.5mW` ... `Pow12.5mW`, bias voltage, magnetic field, temperature, or frequency).
+  - Automatically sorts steps numerically by the extracted parameter value while preserving replicate runs (e.g., `Test1`, `Test2`, `Test3`, `set1`) as distinct, navigable steps.
+  - Links step-specific `*.log` coordinate files and automatically propagates reference PD channels to PR-only acquisitions.
 - **Chopper / Lock-in frequency extraction**: Parses lock-in reference frequency from metadata filenames (e.g. `fchop180Hz` $\to 180\text{ Hz}$).
 - **Instant lazy loading**: Scans and indexes hundreds of files in $< 10\text{ ms}$; full-resolution images are loaded into memory on-demand.
 
