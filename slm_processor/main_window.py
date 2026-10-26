@@ -944,7 +944,7 @@ class SLMMainWindow(QMainWindow):
         for i, scan in enumerate(self.dataset.scans):
             if is_time:
                 self.combo_steps.addItem(f"t = {scan.step_name} (frame {i})")
-            elif "Harm" in scan.step_name or "Step" in scan.step_name:
+            elif "Harm" in scan.step_name or "Step" in scan.step_name or getattr(self.dataset, "series_variable_name", "") != "Step":
                 self.combo_steps.addItem(f"{scan.step_name}")
             else:
                 self.combo_steps.addItem(f"Step {scan.step_name} (Run {scan.step_value:g})")
@@ -960,6 +960,8 @@ class SLMMainWindow(QMainWindow):
             self.lbl_dataset_info.setText(f"Time Domain: {len(self.dataset)} slices (0 to {self.dataset.scans[-1].step_value:.2f} ms)")
         elif self.dataset.is_harmonic_series:
             self.lbl_dataset_info.setText(f"Harmonic Series: {len(self.dataset)} steps (Harm 1 to {len(self.dataset)})")
+        elif getattr(self.dataset, "series_variable_name", "") and self.dataset.series_variable_name != "Step":
+            self.lbl_dataset_info.setText(f"{len(self.dataset)} scans ({self.dataset.series_variable_name}) loaded from {os.path.basename(self.dataset.root_dir)}")
         else:
             self.lbl_dataset_info.setText(f"{len(self.dataset)} scans loaded from {os.path.basename(self.dataset.root_dir)}")
 
@@ -1440,7 +1442,7 @@ class SLMMainWindow(QMainWindow):
 
         self.series_metrics = metric_vals
         var_name = getattr(self.dataset, "series_variable_name", "Step")
-        x_label = "Time (ms)" if var_name == "Time (ms)" else ("Harmonic Number" if var_name == "Harmonic" else "Step / Run Number")
+        x_label = "Time (ms)" if var_name == "Time (ms)" else ("Harmonic Number" if var_name == "Harmonic" else (var_name if var_name != "Step" else "Step / Run Number"))
         self.canvas_series.set_series_data(
             step_names=self.dataset.step_names,
             step_vals=self.dataset.step_values,
@@ -1495,10 +1497,13 @@ class SLMMainWindow(QMainWindow):
             self._update_display()
             # Update series highlight
             if self.series_metrics:
+                var_name = getattr(self.dataset, "series_variable_name", "Step")
+                x_label = "Time (ms)" if var_name == "Time (ms)" else ("Harmonic Number" if var_name == "Harmonic" else (var_name if var_name != "Step" else "Step / Run Number"))
                 self.canvas_series.set_series_data(
                     self.dataset.step_names, self.dataset.step_values,
                     self.series_metrics, current_step_idx=idx,
-                    metric_name=f"ROI Mean ({self.combo_channel.currentText()})"
+                    metric_name=f"ROI Mean ({self.combo_channel.currentText()})",
+                    x_label=x_label
                 )
 
     def _on_step_slider_changed(self, val: int):

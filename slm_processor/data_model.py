@@ -608,21 +608,235 @@ class SLMDataset:
                             s.raw_channels[ch] = nearest.raw_channels[ch]
                     s._auto_detect_lockin_pairs()
 
+    @staticmethod
+    def _extract_controlled_parameter(stems: List[str]) -> Optional[Tuple[str, str, List[Tuple[str, float, str, str]]]]:
+        """Analyzes a list of scan stems to detect the changing controlled parameter.
+
+        Returns:
+            (param_name, common_unit, [(stem, val_num, unit, extra), ...])
+        """
+        if not stems or len(stems) <= 1:
+            return None
+
+        # Check for explicit tokens like Harm, Step, Run, Scan first if present in all stems
+        for token_pat, token_name in [
+            (r'Harm(\d+)', 'Harmonic'),
+            (r'Step[_-]?(\d+(?:\.\d+)?)', 'Step'),
+            (r'Run[_-]?(\d+(?:\.\d+)?)', 'Run'),
+            (r'Scan[_-]?(\d+(?:\.\d+)?)', 'Scan'),
+        ]:
+            matches = []
+            for s in stems:
+                m = re.search(token_pat, s, re.IGNORECASE)
+                if m:
+                    matches.append((s, float(m.group(1)), "", ""))
+            if len(matches) == len(stems) and len(set(x[1] for x in matches)) > 1:
+                return token_name, "", matches
+
+        # Strategy 1: Common Prefix Analysis
+        prefix = os.path.commonprefix(stems)
+        p_clean = prefix.rstrip("_ -")
+        m_param = re.search(r'([a-zA-Z0-9]+)$', p_clean)
+        param_name = m_param.group(1) if m_param else "Param"
+
+        num_pat = re.compile(r'^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s*([a-zA-ZµμΩ%]*)(?:[_-]?(.*))?$')
+
+        parsed = []
+        units = []
+        all_matched = True
+
+        for s in stems:
+            rem = s[len(prefix):].lstrip('_')
+            m = num_pat.match(rem)
+            if m:
+                v = float(m.group(1))
+                u = m.group(2) or ""
+                extra = m.group(3) or ""
+                parsed.append((s, v, u, extra))
+                if u:
+                    units.append(u)
+            else:
+                all_matched = False
+                break
+
+        if all_matched and len(set(p[1] for p in parsed)) > 1:
+            common_u = units[0] if units else ""
+            return param_name, common_u, parsed
+
+        # Strategy 2: Token Column Analysis (delimited by _ or -)
+        tokens_list = [re.split(r'[_\-]+', s) for s in stems]
+        min_len = min(len(t) for t in tokens_list)
+        best_col = None
+        best_unique = 0
+        best_parsed = None
+        best_name = "Param"
+        best_unit = ""
+
+        token_num_pat = re.compile(r'^([a-zA-Z]*)([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s*([a-zA-ZµμΩ%]*)$')
+
+        for col in range(min_len):
+            col_toks = [t[col] for t in tokens_list]
+            col_parsed = []
+            col_matched = True
+            col_units = []
+            names = []
+            for i, tok in enumerate(col_toks):
+                m = token_num_pat.match(tok)
+                if m:
+                    p_prefix = m.group(1)
+                    num = float(m.group(2))
+                    u = m.group(3) or ""
+                    extra = "_".join(tokens_list[i][col+1:])
+                    col_parsed.append((stems[i], num, u, extra))
+                    if p_prefix:
+                        names.append(p_prefix)
+                    if u:
+                        col_units.append(u)
+                else:
+                    col_matched = False
+                    break
+            if col_matched:
+                unique_nums = len(set(p[1] for p in col_parsed))
+                if unique_nums > best_unique:
+                    best_unique = unique_nums
+                    best_col = col
+                    best_parsed = col_parsed
+                    best_name = names[0] if names else (tokens_list[0][col-1] if col > 0 else "Param")
+                    best_unit = col_units[0] if col_units else ""
+
+        if best_parsed and best_unique > 1:
+            return best_name, best_unit, best_parsed
+
+        # Strategy 3: General physical unit search across all stems
+        units_pat = r'([+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*(uA|mA|nA|pA|A|V|mV|uV|nV|kV|W|mW|uW|nW|pW|kW|dBm|dB|K|mK|GHz|MHz|kHz|Hz|THz|um|nm|pm|mm|cm|m|deg|rad|ms|us|ns|s|min|h|T|mT|uT|G|kG|Oe|bar|mbar|Torr|Pa|kPa|%)(?:_|[^\w]|$)'
+        unit_candidates = defaultdict(dict)
+        for s in stems:
+            for m in re.finditer(units_pat, s, re.IGNORECASE):
+                val = float(m.group(1))
+                u = m.group(2)
+                unit_candidates[u.upper()][s] = val
+
+        best_u = None
+        best_cnt = 1
+        for u, s_dict in unit_candidates.items():
+            unique_v = len(set(s_dict.values()))
+            if unique_v > best_cnt and len(s_dict) == len(stems):
+                best_cnt = unique_v
+                best_u = u
+
+        if best_u is not None:
+            parsed_u = []
+            for s in stems:
+                val = unit_candidates[best_u][s]
+                parsed_u.append((s, val, best_u, ""))
+            return "Param", best_u, parsed_u
+
+        # Strategy 4: Fallback to any changing number in the stem
+        num_search = re.compile(r'([+-]?(?:\d+(?:\.\d*)?|\.\d+))')
+        fallback_parsed = []
+        for s in stems:
+            m = num_search.search(s[len(prefix):] if prefix else s)
+            if not m:
+                m = num_search.search(s)
+            val = float(m.group(1)) if m else 0.0
+            fallback_parsed.append((s, val, "", ""))
+
+        if len(set(x[1] for x in fallback_parsed)) > 1:
+            return param_name, "", fallback_parsed
+
+        return None
+
     def _detect_flat_series(self, tiffs: List[str]) -> Optional[Dict[str, Any]]:
-        # 1. Standard series tokens
+        """Automatically detects repeating acquisition series patterns in flat folders.
+
+        Identifies repeating names appended with channel identifiers (e.g. PD, PR),
+        extracts the controlled parameter that changes across scan steps, and sorts
+        them numerically.
+        """
+        if len(tiffs) <= 1:
+            return None
+
+        # Auto-detect chopper / LIA reference frequency if encoded in filenames (e.g. fchop180Hz or fmod3kHz)
+        for f in tiffs[:50]:
+            m_f = re.search(r'(?:fchop|fmod)(\d+(?:\.\d+)?)\s*(kHz|Hz|MHz)?', f, re.IGNORECASE)
+            if m_f:
+                val = float(m_f.group(1))
+                u = (m_f.group(2) or "Hz").lower()
+                scale = 1000.0 if u == "khz" else (1e6 if u == "mhz" else 1.0)
+                self.detected_lia_freq = val * scale
+                break
+
+        # 1. Pattern detection: Group files by channel suffix stripping
+        chan_suffix_regex = re.compile(
+            r'(?P<sep>[_-])'
+            r'(?P<chan>'
+                r'(?:(?:Xs|Ys|X|Y)[_-]?(?:PD|PR|P4|P2|Photodiode|Photoresponse|Diode|RF))'
+                r'|(?:(?:PD|PR|P4|P2|Photodiode|Photoresponse|Diode|RF)[_-]?(?:Xs|Ys|X|Y)?)'
+                r'|(?:(?:Xs|Ys|X|Y)\b)'
+            r')'
+            r'(?P<tag>[_-](?:ovld|ovl|sat|saturated))?'
+            r'\.(?:tiff?|tif)$',
+            re.IGNORECASE
+        )
+
+        stem_groups: Dict[str, List[str]] = defaultdict(list)
+        for f in tiffs:
+            m = chan_suffix_regex.search(f)
+            if m:
+                stem = f[:m.start()]
+            else:
+                base, _ = os.path.splitext(f)
+                stem = base
+            stem_groups[stem].append(f)
+
+        if len(stem_groups) > 1:
+            stems = list(stem_groups.keys())
+            param_info = self._extract_controlled_parameter(stems)
+            if param_info is not None:
+                param_name, common_unit, parsed_stems = param_info
+
+                parsed_scans = []
+                for s_name, val_num, unit, extra in parsed_stems:
+                    parsed_scans.append({
+                        'stem': s_name,
+                        'val_num': val_num,
+                        'unit': unit or common_unit,
+                        'extra': extra,
+                        'files': stem_groups[s_name]
+                    })
+
+                parsed_scans.sort(key=lambda s: (s['val_num'], s['extra'], s['stem']))
+
+                is_harm = bool(re.search(r'Harm', param_name, re.IGNORECASE))
+                if is_harm:
+                    self.is_harmonic_series = True
+                    self.series_variable_name = "Harmonic"
+                    if self.detected_lia_freq is None:
+                        self.detected_lia_freq = 180.0
+                    var_name = "Harmonic"
+                else:
+                    var_name = f"{param_name} ({common_unit})" if common_unit else param_name
+                    self.series_variable_name = var_name
+
+                groups_dict = defaultdict(list)
+                for s in parsed_scans:
+                    groups_dict[s['val_num']].extend(s['files'])
+
+                return {
+                    'var_name': var_name,
+                    'param_name': param_name,
+                    'unit': common_unit,
+                    'scans': parsed_scans,
+                    'groups': groups_dict
+                }
+
+        # 2. Legacy fallback: Standard series tokens (Harm, Step, Run, Scan)
         patterns = [
             (r'Harm(\d+)', 'Harmonic'),
             (r'Step[_-]?(\d+(?:\.\d+)?)', 'Step'),
             (r'Run[_-]?(\d+(?:\.\d+)?)', 'Run'),
             (r'Scan[_-]?(\d+(?:\.\d+)?)', 'Scan'),
         ]
-
-        # Auto-detect chopper / LIA reference frequency if encoded in filenames (e.g. fchop180Hz)
-        for f in tiffs[:50]:
-            m_f = re.search(r'fchop(\d+(?:\.\d+)?)Hz', f, re.IGNORECASE)
-            if m_f:
-                self.detected_lia_freq = float(m_f.group(1))
-                break
 
         for pat, var_name in patterns:
             groups = defaultdict(list)
@@ -650,32 +864,7 @@ class SLMDataset:
                     'groups': groups
                 }
 
-        # 2. Parameter with physical units (find which unit actually varies across scans)
-        units_pat = r'(\d+(?:\.\d+)?)\s*(uA|mA|nA|pA|A|V|mV|uV|K|mK|GHz|MHz|kHz|Hz|um|nm|deg|ms|s)(?:_|[^\w]|$)'
-        unit_groups = defaultdict(lambda: defaultdict(list))
-        for f in tiffs:
-            for m in re.finditer(units_pat, f, re.IGNORECASE):
-                val = float(m.group(1))
-                unit = m.group(2).upper()
-                unit_groups[unit][val].append(f)
-
-        best_unit = None
-        best_count = 1
-        for unit, val_dict in unit_groups.items():
-            if len(val_dict) > best_count:
-                best_count = len(val_dict)
-                best_unit = unit
-
-        if best_unit is not None:
-            var_name = f"Param ({best_unit})"
-            unit_pat = rf'(\d+(?:\.\d+)?)\s*{re.escape(best_unit)}(?:_|[^\w]|$)'
-            return {
-                'var_name': var_name,
-                'regex': unit_pat,
-                'groups': unit_groups[best_unit]
-            }
-
-        # 3. Fallback to generic numeric index
+        # 3. Fallback: Generic numeric index
         groups = defaultdict(list)
         for f in tiffs:
             m = re.search(r'_(\d{1,5})[_\.]', f)
@@ -691,7 +880,6 @@ class SLMDataset:
         return None
 
     def _load_flat_series_dataset(self, series_info: Dict[str, Any], all_files: List[str]):
-        groups = series_info['groups']
         var_name = series_info['var_name']
         log_files = [f for f in all_files if f.lower().endswith(".log")]
 
@@ -709,44 +897,97 @@ class SLMDataset:
             except Exception as e:
                 print(f"Warning reading sample log: {e}")
 
-        for val_num in sorted(groups.keys()):
-            step_files = groups[val_num]
-            step_name = f"{var_name} {int(val_num) if val_num.is_integer() else val_num}"
-            scan = SLMScan(folder_path=self.root_dir, step_name=step_name, step_value=val_num)
+        # Check if structured scans were extracted via pattern detection
+        if "scans" in series_info:
+            scans_data = series_info["scans"]
+            param_name = series_info.get("param_name", "Step")
+            common_unit = series_info.get("unit", "")
 
-            for f in step_files:
-                chan_name = extract_clean_channel_name(f)
-                scan.file_paths[chan_name] = os.path.join(self.root_dir, f)
+            for s_entry in scans_data:
+                val_num = s_entry["val_num"]
+                stem = s_entry["stem"]
+                step_files = s_entry["files"]
+                u = s_entry.get("unit") or common_unit
+                unit_str = f" {u}" if u else ""
+                extra_str = f" ({s_entry['extra']})" if s_entry.get("extra") else ""
+                step_name = f"{param_name} {val_num:g}{unit_str}{extra_str}"
 
-            # Match per-step log file if available
-            matched_log = None
-            pat = series_info['regex']
-            for lf in log_files:
-                m = re.search(pat, lf, re.IGNORECASE)
-                if m:
-                    try:
-                        if float(m.group(1)) == val_num:
+                scan = SLMScan(folder_path=self.root_dir, step_name=step_name, step_value=val_num)
+
+                # Prioritize non-overloaded channels for standard channel keys
+                sorted_files = sorted(step_files, key=lambda f: 1 if bool(re.search(r'(?:ovld|ovl)', f, re.IGNORECASE)) else 0)
+                for f in sorted_files:
+                    chan_name = extract_clean_channel_name(f)
+                    is_ovld = bool(re.search(r'(?:ovld|ovl)', f, re.IGNORECASE))
+                    if chan_name not in scan.file_paths or not is_ovld:
+                        scan.file_paths[chan_name] = os.path.join(self.root_dir, f)
+                    if is_ovld:
+                        scan.file_paths[f"{chan_name}_ovld"] = os.path.join(self.root_dir, f)
+
+                # Match per-step log file from step files or stem
+                matched_log = None
+                for f in step_files:
+                    cand_log = os.path.join(self.root_dir, os.path.splitext(f)[0] + ".log")
+                    if os.path.isfile(cand_log):
+                        matched_log = cand_log
+                        break
+                if not matched_log:
+                    for lf in log_files:
+                        if stem.lower() in lf.lower():
                             matched_log = os.path.join(self.root_dir, lf)
                             break
-                    except ValueError:
+
+                if matched_log:
+                    try:
+                        with open(matched_log, "r") as lf:
+                            lines = [l.strip().split() for l in lf if l.strip()]
+                        if len(lines) >= 2:
+                            scan.x_volts = np.array([float(x) for x in lines[0]], dtype=np.float32)
+                            scan.y_volts = np.array([float(y) for y in lines[1]], dtype=np.float32)
+                    except Exception:
                         pass
 
-            if matched_log:
-                try:
-                    with open(matched_log, "r") as lf:
-                        lines = [l.strip().split() for l in lf if l.strip()]
-                    if len(lines) >= 2:
-                        scan.x_volts = np.array([float(x) for x in lines[0]], dtype=np.float32)
-                        scan.y_volts = np.array([float(y) for y in lines[1]], dtype=np.float32)
-                except Exception:
-                    pass
+                if len(scan.x_volts) == 0 and default_x_volts is not None:
+                    scan.x_volts = default_x_volts.copy()
+                    scan.y_volts = default_y_volts.copy()
 
-            if len(scan.x_volts) == 0 and default_x_volts is not None:
-                scan.x_volts = default_x_volts.copy()
-                scan.y_volts = default_y_volts.copy()
+                scan._auto_detect_lockin_pairs()
+                self.scans.append(scan)
+        else:
+            # Fallback legacy groups loading
+            groups = series_info['groups']
+            for val_num in sorted(groups.keys()):
+                step_files = groups[val_num]
+                step_name = f"{var_name} {int(val_num) if val_num.is_integer() else val_num}"
+                scan = SLMScan(folder_path=self.root_dir, step_name=step_name, step_value=val_num)
 
-            scan._auto_detect_lockin_pairs()
-            self.scans.append(scan)
+                for f in step_files:
+                    chan_name = extract_clean_channel_name(f)
+                    scan.file_paths[chan_name] = os.path.join(self.root_dir, f)
+
+                matched_log = None
+                for f in step_files:
+                    cand_log = os.path.join(self.root_dir, os.path.splitext(f)[0] + ".log")
+                    if os.path.isfile(cand_log):
+                        matched_log = cand_log
+                        break
+
+                if matched_log:
+                    try:
+                        with open(matched_log, "r") as lf:
+                            lines = [l.strip().split() for l in lf if l.strip()]
+                        if len(lines) >= 2:
+                            scan.x_volts = np.array([float(x) for x in lines[0]], dtype=np.float32)
+                            scan.y_volts = np.array([float(y) for y in lines[1]], dtype=np.float32)
+                    except Exception:
+                        pass
+
+                if len(scan.x_volts) == 0 and default_x_volts is not None:
+                    scan.x_volts = default_x_volts.copy()
+                    scan.y_volts = default_y_volts.copy()
+
+                scan._auto_detect_lockin_pairs()
+                self.scans.append(scan)
 
         # Propagate reference PD to any scans in the series that lack PD channels
         scans_with_pd = [s for s in self.scans if s.has_channel("PD_X") and s.has_channel("PD_Y")]
