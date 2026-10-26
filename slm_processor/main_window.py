@@ -226,6 +226,7 @@ class SLMMainWindow(QMainWindow):
 
         # Cached series data
         self.series_metrics: List[float] = []
+        self._series_trend_dirty: bool = True
 
         # Animation player state
         self.anim_timer = QTimer(self)
@@ -505,7 +506,7 @@ class SLMMainWindow(QMainWindow):
         proc_layout.addWidget(QLabel("Plane Leveling:"), 0, 0)
         self.combo_plane = QComboBox()
         self.combo_plane.addItems(["None", "Subtract Plane Tilt (1st Order)", "Subtract Polynomial (2nd Order)"])
-        self.combo_plane.currentIndexChanged.connect(self._update_display)
+        self.combo_plane.currentIndexChanged.connect(self._on_filter_changed)
         proc_layout.addWidget(self.combo_plane, 0, 1)
 
         proc_layout.addWidget(QLabel("Line Subtraction:"), 1, 0)
@@ -517,13 +518,13 @@ class SLMMainWindow(QMainWindow):
             "Subtract Row Linear Tilt",
             "Subtract Column Mean"
         ])
-        self.combo_line_sub.currentIndexChanged.connect(self._update_display)
+        self.combo_line_sub.currentIndexChanged.connect(self._on_filter_changed)
         proc_layout.addWidget(self.combo_line_sub, 1, 1)
 
         proc_layout.addWidget(QLabel("Spatial Filter:"), 2, 0)
         self.combo_filter = QComboBox()
         self.combo_filter.addItems(["None", "Gaussian Filter", "Median Filter"])
-        self.combo_filter.currentIndexChanged.connect(self._update_display)
+        self.combo_filter.currentIndexChanged.connect(self._on_filter_changed)
         proc_layout.addWidget(self.combo_filter, 2, 1)
 
         proc_layout.addWidget(QLabel("Filter Param (σ / k):"), 3, 0)
@@ -531,7 +532,7 @@ class SLMMainWindow(QMainWindow):
         self.spin_filter_param.setRange(0.1, 15.0)
         self.spin_filter_param.setValue(1.0)
         self.spin_filter_param.setSingleStep(0.5)
-        self.spin_filter_param.valueChanged.connect(self._update_display)
+        self.spin_filter_param.valueChanged.connect(self._on_filter_changed)
         proc_layout.addWidget(self.spin_filter_param, 3, 1)
         sidebar_layout.addWidget(group_proc)
 
@@ -868,6 +869,7 @@ class SLMMainWindow(QMainWindow):
         self.canvas_series = SLMSeriesCanvas(self)
         self.canvas_series.step_selected.connect(self._on_series_step_clicked)
         self.canvas_series.export_gif_requested.connect(self._on_export_gif)
+        self.canvas_series.metric_changed.connect(self._on_series_metric_changed)
         layout_series.addWidget(self.canvas_series)
         self.tabs.addTab(self.canvas_series, "Run Series Trend")
 
@@ -1420,16 +1422,35 @@ class SLMMainWindow(QMainWindow):
         self.table_roi.item(4, 1).setText(f"{stats['peak_to_peak']:.4e}")
         self.table_roi.item(5, 1).setText(f"{stats['count']}")
 
+    def _on_filter_changed(self):
+        """Called when leveling or preprocessing filters are changed by user."""
+        self._series_trend_dirty = True
+        self._update_display()
+        if self.tabs.currentIndex() == 2:
+            self._update_series_trend()
+
+    def _on_series_metric_changed(self, metric_key: str):
+        """Called when user changes the metric dropdown on the Run Series Trend canvas."""
+        self._update_series_trend()
+
     def _update_series_trend(self):
-        """Computes ROI mean across all loaded scans in the dataset."""
+        """Computes ROI metric across all loaded scans in the dataset."""
         if not self.dataset or len(self.dataset) == 0:
             return
 
         channel_key = self._get_current_channel_key()
         phase_deg = self.spin_phase.value()
         
+        # Determine metric to calculate
+        metric_key = "mean"
+        metric_label = "Mean"
+        if hasattr(self, "canvas_series") and hasattr(self.canvas_series, "get_selected_metric_key"):
+            metric_key = self.canvas_series.get_selected_metric_key()
+            metric_label = self.canvas_series.get_selected_metric_label()
+
         # Get active ROI box or full image if not set
         bbox = self.canvas_2d.roi_box
+        is_roi = (bbox is not None)
         if bbox is None:
             shape = self.dataset[0].shape
             bbox = (0, 0, shape[1] - 1, shape[0] - 1)
@@ -1438,17 +1459,24 @@ class SLMMainWindow(QMainWindow):
         for scan in self.dataset.scans:
             proc = self._get_processed_image(scan, channel_key, phase_deg)
             stats = processing.calculate_roi_stats(proc, bbox)
-            metric_vals.append(stats["mean"])
+            val = stats.get(metric_key, stats.get("mean", 0.0))
+            metric_vals.append(val)
 
         self.series_metrics = metric_vals
+        self._series_trend_dirty = False
+
         var_name = getattr(self.dataset, "series_variable_name", "Step")
         x_label = "Time (ms)" if var_name == "Time (ms)" else ("Harmonic Number" if var_name == "Harmonic" else (var_name if var_name != "Step" else "Step / Run Number"))
+        roi_prefix = "ROI" if is_roi else "Global"
+        chan_text = self.combo_channel.currentText()
+        metric_name = f"{roi_prefix} {metric_label} ({chan_text})"
+
         self.canvas_series.set_series_data(
             step_names=self.dataset.step_names,
             step_vals=self.dataset.step_values,
             metric_vals=metric_vals,
             current_step_idx=self.current_scan_idx,
-            metric_name=f"ROI Mean ({self.combo_channel.currentText()})",
+            metric_name=metric_name,
             x_label=x_label
         )
 
@@ -1499,10 +1527,14 @@ class SLMMainWindow(QMainWindow):
             if self.series_metrics:
                 var_name = getattr(self.dataset, "series_variable_name", "Step")
                 x_label = "Time (ms)" if var_name == "Time (ms)" else ("Harmonic Number" if var_name == "Harmonic" else (var_name if var_name != "Step" else "Step / Run Number"))
+                metric_label = "Mean"
+                if hasattr(self, "canvas_series") and hasattr(self.canvas_series, "get_selected_metric_label"):
+                    metric_label = self.canvas_series.get_selected_metric_label()
+                roi_prefix = "ROI" if self.canvas_2d.roi_box is not None else "Global"
                 self.canvas_series.set_series_data(
                     self.dataset.step_names, self.dataset.step_values,
                     self.series_metrics, current_step_idx=idx,
-                    metric_name=f"ROI Mean ({self.combo_channel.currentText()})",
+                    metric_name=f"{roi_prefix} {metric_label} ({self.combo_channel.currentText()})",
                     x_label=x_label
                 )
 
@@ -1558,13 +1590,19 @@ class SLMMainWindow(QMainWindow):
         self.slider_phase.blockSignals(True)
         self.slider_phase.setValue(int(np.round(val)))
         self.slider_phase.blockSignals(False)
+        self._series_trend_dirty = True
         self._update_display()
+        if self.tabs.currentIndex() == 2:
+            self._update_series_trend()
 
     def _on_phase_slider_changed(self, val: int):
         self.spin_phase.blockSignals(True)
         self.spin_phase.setValue(float(val))
         self.spin_phase.blockSignals(False)
+        self._series_trend_dirty = True
         self._update_display()
+        if self.tabs.currentIndex() == 2:
+            self._update_series_trend()
 
     def _on_auto_phase_clicked(self):
         if not self.dataset or self.current_scan_idx >= len(self.dataset):
@@ -1783,7 +1821,8 @@ class SLMMainWindow(QMainWindow):
         if index == 1:
             self._update_dual_view()
         elif index == 2:
-            self._update_series_trend()
+            if getattr(self, "_series_trend_dirty", True):
+                self._update_series_trend()
         self._update_quick_buttons_state()
 
     def _on_reset_filters(self):
@@ -1792,7 +1831,10 @@ class SLMMainWindow(QMainWindow):
         self.combo_filter.setCurrentIndex(0)
         self.spin_phase.setValue(0.0)
         self.combo_contrast.setCurrentText("Min-Max")
+        self._series_trend_dirty = True
         self._update_display()
+        if self.tabs.currentIndex() == 2:
+            self._update_series_trend()
 
     # --- Export Features ---
 

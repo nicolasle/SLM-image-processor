@@ -3,7 +3,7 @@
 import numpy as np
 from typing import Optional, List
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QComboBox
 )
 from PyQt6.QtCore import pyqtSignal
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
@@ -14,6 +14,7 @@ class SLMSeriesCanvas(QWidget):
     """Plots signal trends across multi-run / multi-step datasets."""
     step_selected = pyqtSignal(int)  # emits index of the clicked scan step
     export_gif_requested = pyqtSignal()
+    metric_changed = pyqtSignal(str)  # emits selected metric key ("mean", "max", etc.)
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -37,17 +38,32 @@ class SLMSeriesCanvas(QWidget):
         header = QHBoxLayout()
         self.title_label = QLabel("Run / Step Series Trend")
         self.title_label.setStyleSheet("color: #e0e0e0; font-weight: bold; font-size: 11px;")
+        header.addWidget(self.title_label)
+
+        self.lbl_metric = QLabel("Metric:")
+        self.lbl_metric.setStyleSheet("color: #aaaaaa; font-size: 10px; margin-left: 8px;")
+        header.addWidget(self.lbl_metric)
+
+        self.combo_metric = QComboBox()
+        self.combo_metric.setStyleSheet("font-size: 10px; padding: 1px 4px;")
+        self.combo_metric.addItem("Mean", "mean")
+        self.combo_metric.addItem("Max (Peak)", "max")
+        self.combo_metric.addItem("Min", "min")
+        self.combo_metric.addItem("Std Dev", "std")
+        self.combo_metric.addItem("Peak-to-Peak", "peak_to_peak")
+        self.combo_metric.addItem("Sum", "sum")
+        self.combo_metric.currentIndexChanged.connect(self._on_metric_changed)
+        header.addWidget(self.combo_metric)
+
+        header.addStretch(1)
+        self.btn_export_gif = QPushButton("Export Movie GIF...")
+        self.btn_export_gif.setStyleSheet("font-size: 10px; padding: 2px 8px; color: #00e5ff;")
+        self.btn_export_gif.clicked.connect(self.export_gif_requested.emit)
 
         self.btn_export = QPushButton("Export Series CSV")
         self.btn_export.setStyleSheet("font-size: 10px; padding: 2px 8px;")
         self.btn_export.clicked.connect(self._export_csv)
 
-        self.btn_export_gif = QPushButton("Export Movie GIF...")
-        self.btn_export_gif.setStyleSheet("font-size: 10px; padding: 2px 8px; color: #00e5ff;")
-        self.btn_export_gif.clicked.connect(self.export_gif_requested.emit)
-
-        header.addWidget(self.title_label)
-        header.addStretch(1)
         header.addWidget(self.btn_export_gif)
         header.addWidget(self.btn_export)
 
@@ -103,6 +119,17 @@ class SLMSeriesCanvas(QWidget):
 
         self.fig.tight_layout()
         self.canvas.draw_idle()
+
+    def get_selected_metric_key(self) -> str:
+        """Returns the internal data key for the selected metric (e.g. 'mean', 'max')."""
+        return self.combo_metric.currentData() or "mean"
+
+    def get_selected_metric_label(self) -> str:
+        """Returns the user-visible label for the selected metric (e.g. 'Max (Peak)')."""
+        return self.combo_metric.currentText()
+
+    def _on_metric_changed(self):
+        self.metric_changed.emit(self.get_selected_metric_key())
 
     def _on_click(self, event):
         if event.inaxes != self.ax or not self.step_vals:
